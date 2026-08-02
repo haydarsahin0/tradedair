@@ -93,6 +93,27 @@ else
     warn "Stop emirleri sadece botta tutuluyor"
 fi
 
+bold "9. Calisma ritmi"
+cat <<'TXT'
+   ~5 saniye     bot dongusu; ACIK pozisyonlarda kar hedefi ve stop kontrolu
+   15 dakika     YENI sinyal aramasi (mum kapanisinda: :00 :15 :30 :45)
+   60 saniye     borsadaki stop emrinin senkronu
+   30 dakika     cift listesi yenilenmesi (hacme gore)
+   60 dakika     oynaklik filtresi yenilenmesi
+   10 dakika     dolmayan giris emri iptal edilir
+TXT
+
+bold "10. Son aktivite"
+LAST="$(docker compose logs --tail 400 2>/dev/null | grep -E "Analyzing|Bot heartbeat|Found [0-9]+ pair" | tail -3)"
+if [ -n "$LAST" ]; then
+    printf '%s\n' "$LAST" | sed 's/^/   /'
+else
+    warn "Loglarda aktivite izi yok — bot yeni baslamis olabilir"
+fi
+
+WL="$(docker compose logs --tail 500 2>/dev/null | grep -oE "Whitelist with [0-9]+ pairs" | tail -1)"
+[ -n "$WL" ] && ok "$WL"
+
 echo
 if [ "$PROBLEMS" -eq 0 ]; then
     printf '\033[32m\033[1m  SISTEM 7/24 CALISMAYA HAZIR.\033[0m\n'
