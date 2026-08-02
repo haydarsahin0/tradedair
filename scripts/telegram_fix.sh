@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+#
+# Telegram baglantisini teshis eder ve chat ID'yi otomatik bulur.
+#
+# "Chat not found" hatasi aliyorsan bunu calistir:
+#     ./scripts/telegram_fix.sh
+
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+bold() { printf '\033[1m%s\033[0m\n' "$*"; }
+ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
+bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; }
+warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
+
+[ -f .env ] || { bad ".env dosyasi yok."; exit 1; }
+# shellcheck disable=SC1091
+set -a; . ./.env; set +a
+
+TOKEN="${TELEGRAM_TOKEN:-}"
+[ -n "$TOKEN" ] || { bad ".env icinde TELEGRAM_TOKEN bos."; exit 1; }
+
+api() { curl -sS --max-time 15 "https://api.telegram.org/bot${TOKEN}/$1"; }
+
+echo
+bold "1/4  Token gecerli mi?"
+ME="$(api getMe)"
+if ! printf '%s' "$ME" | grep -q '"ok":true'; then
+    bad "Token gecersiz. Telegram'da @BotFather -> /mybots -> API Token ile kontrol et."
+    echo "  Donen cevap: $ME"
+    exit 1
+fi
+BOT_NAME="$(printf '%s' "$ME" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["username"])')"
+ok "Token gecerli — bot: @${BOT_NAME}"
+
+# Bot calisiyorsa gelen mesajlari o yutar, getUpdates bos doner.
+echo
+bold "2/4  Bot gecici olarak durduruluyor"
+if docker compose ps --status running 2>/dev/null | grep -q tradedair; then
+    docker compose stop >/dev/null 2>&1
+    ok "Durduruldu (sonunda tekrar baslatilacak)"
+    RESTART=1
+else
+    ok "Zaten calismiyor"
+fi
+
+echo
+bold "3/4  Chat ID araniyor"
+echo
+echo "  ==> SIMDI TELEGRAM'I AC:"
+echo "      1. @${BOT_NAME} botunu ara"
+echo "      2. Sohbeti ac ve START butonuna bas"
+echo "      3. Bota herhangi bir mesaj yaz (ornegin: merhaba)"
+echo
+read -r -p "  Bunu yaptiktan sonra ENTER'a bas..." _
+
+UPD="$(api getUpdates)"
+IDS="$(printf '%s' "$UPD" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+seen = []
+for u in d.get("result", []):
+    for k in ("message", "edited_message", "channel_post", "my_chat_member"):
+        c = u.get(k, {}).get("chat")
+        if c and c.get("id") not in [s[0] for s in seen]:
+            seen.append((c["id"], c.get("first_name") or c.get("title") or ""))
+for i, n in seen:
+    print(f"{i}\t{n}")
+')"
+
+if [ -z "$IDS" ]; then
+    bad "Hic mesaj bulunamadi."
+    echo
+    echo "  Muhtemel sebepler:"
+    echo "    - Bota henuz mesaj yazmadin"
+    echo "    - Yanlis botu araddin (dogrusu: @${BOT_NAME})"
+    echo
+    echo "  Bota mesaj yazip bu script'i tekrar calistir."
+    [ -n "${RESTART:-}" ] && docker compose start >/dev/null 2>&1
+    exit 1
+fi
+
+echo
+ok "Bulunan sohbet(ler):"
+printf '%s\n' "$IDS" | while IFS=$'\t' read -r id name; do
+    echo "      $id   $name"
+done
+
+NEW_ID="$(printf '%s' "$IDS" | head -1 | cut -f1)"
+CUR_ID="${TELEGRAM_CHAT_ID:-}"
+
+echo
+if [ "$NEW_ID" = "$CUR_ID" ]; then
+    ok "Chat ID zaten dogru ($NEW_ID) — sorun baska yerde."
+else
+    warn ".env icindeki ID yanlis:"
+    echo "      mevcut: ${CUR_ID:-<bos>}"
+    echo "      dogru : ${NEW_ID}"
+    sed -i "s|^TELEGRAM_CHAT_ID=.*|TELEGRAM_CHAT_ID=${NEW_ID}|" .env
+    ok ".env guncellendi"
+fi
+
+echo
+bold "4/4  Test mesaji"
+SEND="$(curl -sS --max-time 15 \
+    --data-urlencode "chat_id=${NEW_ID}" \
+    --data-urlencode "text=tradedair baglantisi calisiyor. Bot birazdan baslayacak." \
+    "https://api.telegram.org/bot${TOKEN}/sendMessage")"
+
+if printf '%s' "$SEND" | grep -q '"ok":true'; then
+    ok "Test mesaji gonderildi — Telegram'i kontrol et!"
+else
+    bad "Mesaj gonderilemedi: $SEND"
+fi
+
+echo
+bold "Bot yeniden baslatiliyor"
+docker compose up -d --force-recreate >/dev/null 2>&1
+ok "Basladi"
+echo
+echo "  Birkac saniye icinde Telegram'a 'bot basladi' mesaji gelmeli."
+echo "  Gelmezse:  docker compose logs --tail 30 | grep -i telegram"
+echo
