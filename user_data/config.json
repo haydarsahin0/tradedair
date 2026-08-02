@@ -42,10 +42,8 @@
         "ccxt_async_config": {},
         "pair_whitelist": [],
         "pair_blacklist": [
-            "USDC/USDT:USDT",
-            "USDE/USDT:USDT",
-            "FDUSD/USDT:USDT",
-            ".*(3L|3S|5L|5S)/USDT:USDT"
+            "(USDC|USDE|USDD|USDP|USDS|USD1|FDUSD|TUSD|BUSD|DAI|PYUSD|RLUSD|LUSD|FRAX|GUSD|SUSD|USTC|EURT|EURS|EURI|XAUT|PAXG)/.*",
+            ".*(3L|3S|5L|5S|UP|DOWN)/.*"
         ]
     },
     "pairlists": [

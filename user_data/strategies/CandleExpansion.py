@@ -300,6 +300,66 @@ class CandleExpansion(IStrategy):
 
     # ---------------------------------------------------------------- #
 
+    def confirm_trade_entry(
+        self,
+        pair: str,
+        order_type: str,
+        amount: float,
+        rate: float,
+        time_in_force: str,
+        current_time: datetime,
+        entry_tag: str | None,
+        side: str,
+        **kwargs,
+    ) -> bool:
+        """
+        Emir gonderilmeden hemen once Telegram'a giris ozeti atar.
+
+        Freqtrade'in kendi giris bildirimi fiyat ve miktari gosterir ama
+        NEREDE cikacagini gostermez. Bu mesaj stop ve hedefi de veriyor.
+        Her zaman True doner — islemi engellemez, sadece haber verir.
+        """
+        try:
+            dp = getattr(self, "dp", None)
+            if dp is None or getattr(dp, "runmode", None) is None:
+                return True
+            if dp.runmode.value not in ("live", "dry_run"):
+                return True
+
+            df, _ = dp.get_analyzed_dataframe(pair, self.timeframe)
+            if df is None or df.empty:
+                return True
+
+            last = df.iloc[-1]
+            is_short = side == "short"
+            stop = float(last["stop_short"] if is_short else last["stop_long"])
+            tp = float(self.take_profit_pct.value)
+            lev = float(self.leverage_num.value)
+
+            target = rate * (1 - tp / 100) if is_short else rate * (1 + tp / 100)
+            risk = abs(stop - rate) / rate * 100
+
+            yon = "SHORT \U0001F534" if is_short else "LONG \U0001F7E2"
+            msg = (
+                f"\U0001F4E5 <b>ISLEM ACILIYOR — {yon}</b>\n"
+                f"<b>{pair}</b>\n\n"
+                f"Giris   : {rate:.6g}\n"
+                f"Miktar  : {amount:.6g}\n"
+                f"Kaldirac: {lev:.0f}x\n\n"
+                f"\U0001F6D1 STOP  : {stop:.6g}\n"
+                f"     (%{risk:.2f} uzakta = hesapta -%{risk * lev:.1f})\n"
+                f"\U0001F3AF HEDEF : {target:.6g}\n"
+                f"     (%{tp:.1f} = hesapta +%{tp * lev:.0f})\n\n"
+                f"Risk/Odul: {tp / risk:.2f}"
+            )
+            dp.send_msg(msg, always_send=True)
+        except Exception as e:  # bildirim hatasi islemi engellemesin
+            logger.warning("Giris bildirimi gonderilemedi: %s", e)
+
+        return True
+
+    # ---------------------------------------------------------------- #
+
     def leverage(
         self,
         pair: str,
