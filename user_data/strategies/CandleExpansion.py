@@ -137,6 +137,21 @@ class CandleExpansion(IStrategy):
     # geçmesini engeller.
     max_stop_pct = DecimalParameter(2.0, 12.0, default=10.0, decimals=1, space="buy")
 
+    # --- TAKIP EDEN STOP ---
+    # Fiyat lehimize gittikce stop da pesinden gelir.
+    #
+    # Esikler "R" cinsinden: 1R = giristen yapisal stop'a olan mesafe.
+    # Olculen: 1R ~ %2.3 fiyat, kar hedefi %9 = ~4R, kazananlar ort. 4.1R.
+    #
+    # DIKKAT: bu stratejinin kenari KALIN SAG KUYRUKTA. Kar hedefini
+    # %8'den %4'e indirdigimizde strateji ZARARA gecmisti. Cok siki bir
+    # takip eden stop ayni hatayi yapar — kazananlari erken keser.
+    # Bu yuzden varsayilanlar bilerek GEVSEK secildi.
+    use_trailing = BooleanParameter(default=True, space="sell", optimize=True)
+    be_trigger_r = DecimalParameter(0.5, 3.0, default=2.0, decimals=1, space="sell")
+    trail_trigger_r = DecimalParameter(1.0, 4.0, default=3.0, decimals=1, space="sell")
+    trail_dist_r = DecimalParameter(0.5, 2.5, default=1.5, decimals=1, space="sell")
+
     leverage_num = IntParameter(1, 20, default=8, space="buy", optimize=False)
 
     # Borsa istenen kaldiraci veremiyorsa isleme GIRME.
@@ -455,15 +470,53 @@ class CandleExpansion(IStrategy):
         after_fill: bool,
         **kwargs,
     ) -> float | None:
-        stop = self._stop_for(pair, trade)
-        if stop is None:
+        """
+        Uc kademeli stop:
+
+          1. Yapisal — onceki 4s mumun acilisinin %0.5 otesi (degismez taban)
+          2. Basabas — lehimize be_trigger_r kadar gidince stop girise cekilir
+          3. Takip   — trail_trigger_r'den sonra stop, gorulen en iyi fiyatin
+                       trail_dist_r kadar arkasindan surüklenir
+
+        Stop asla gevsemez; sadece sikilasir.
+        """
+        struct = self._stop_for(pair, trade)
+        if struct is None:
             return None
 
+        entry = trade.open_rate
+        if not entry or entry <= 0:
+            return None
+
+        if not self.use_trailing.value:
+            return stoploss_from_absolute(
+                struct, current_rate, is_short=trade.is_short,
+                leverage=trade.leverage,
+            )
+
+        risk = abs(entry - struct) / entry     # 1R, oran olarak
+        if risk <= 0:
+            return None
+
+        is_short = trade.is_short
+        best = (trade.min_rate if is_short else trade.max_rate) or current_rate
+        move = ((entry - best) if is_short else (best - entry)) / entry
+        move_r = move / risk
+
+        new_stop = struct
+
+        # Kademe 2 — basabas
+        if move_r >= float(self.be_trigger_r.value):
+            new_stop = min(new_stop, entry) if is_short else max(new_stop, entry)
+
+        # Kademe 3 — takip
+        if move_r >= float(self.trail_trigger_r.value):
+            gap = float(self.trail_dist_r.value) * risk
+            trail = best * (1 + gap) if is_short else best * (1 - gap)
+            new_stop = min(new_stop, trail) if is_short else max(new_stop, trail)
+
         return stoploss_from_absolute(
-            stop,
-            current_rate,
-            is_short=trade.is_short,
-            leverage=trade.leverage,
+            new_stop, current_rate, is_short=is_short, leverage=trade.leverage,
         )
 
     def custom_exit(
