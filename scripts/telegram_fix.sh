@@ -19,7 +19,20 @@ set -a; . ./.env; set +a
 
 TOKEN="${TELEGRAM_TOKEN:-}"
 
-api() { curl -sS --max-time 15 "https://api.telegram.org/bot${TOKEN}/$1"; }
+# Cevap govdesini ve HTTP kodunu birlikte doner: "<govde>|<kod>"
+api() {
+    curl -sS --max-time 20 -w '|%{http_code}' \
+        "https://api.telegram.org/bot${TOKEN}/$1" 2>&1
+}
+
+# api.telegram.org'a hic ulasilabiliyor mu? (token sorunu ile ag sorununu ayirmak icin)
+check_net() {
+    local code
+    code="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' \
+            "https://api.telegram.org/bot0:0/getMe" 2>/dev/null || echo "000")"
+    # Gecersiz token'a bile 401/404 doner; 000 = hic baglanilamadi
+    [ "$code" != "000" ]
+}
 
 # .env'e bir anahtari yaz (varsa degistir, yoksa ekle)
 set_env() {
@@ -40,7 +53,20 @@ PY
 }
 
 echo
-bold "1/4  Token gecerli mi?"
+bold "1/4  Baglanti ve token kontrolu"
+
+if check_net; then
+    ok "api.telegram.org'a ulasilabiliyor"
+else
+    bad "Sunucudan api.telegram.org'a ULASILAMIYOR."
+    echo
+    echo "  Bu bir AG sorunu, token sorunu degil. Muhtemel sebepler:"
+    echo "    - Sunucunun disari cikisi engelli"
+    echo "    - Gecici DNS sorunu"
+    echo
+    echo "  Kontrol icin:  curl -v https://api.telegram.org/"
+    exit 1
+fi
 
 if [ -z "$TOKEN" ]; then
     warn ".env icinde TELEGRAM_TOKEN bos."
@@ -51,22 +77,44 @@ fi
 # Token bos ya da gecersizse sor — dogrulanana kadar tekrar sor.
 while :; do
     if [ -n "$TOKEN" ]; then
-        ME="$(api getMe)"
+        RESP="$(api getMe)"
+        CODE="${RESP##*|}"
+        ME="${RESP%|*}"
+
         if printf '%s' "$ME" | grep -q '"ok":true'; then
             break
         fi
-        bad "Bu token calismiyor."
-        printf '  Telegram cevabi: %s\n' "$(printf '%s' "$ME" | head -c 200)"
+
+        echo
+        case "$CODE" in
+            401)
+                bad "Token GECERSIZ (HTTP 401)."
+                echo "     En sik sebep: bu token daha once /revoke ile IPTAL EDILMIS."
+                echo "     Iptal edilen token bir daha calismaz — YENISINI almalisin."
+                ;;
+            404)
+                bad "Token bicimi hatali (HTTP 404)."
+                echo "     Dogru bicim: 1234567890:AAExxxxxxxxxxxxxxxxxxxxxxxx"
+                echo "     Rakamlar, iki nokta ve harfler tek parca halinde olmali."
+                ;;
+            *)
+                bad "Beklenmeyen cevap (HTTP ${CODE})."
+                printf '     %s\n' "$(printf '%s' "$ME" | head -c 200)"
+                ;;
+        esac
     fi
     echo
-    echo "  Telegram'da @BotFather -> /mybots -> botunu sec -> API Token"
-    echo "  (Token su bicimde: 1234567890:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)"
+    echo "  YENI TOKEN NASIL ALINIR:"
+    echo "    1. Telegram'da @BotFather'i ac"
+    echo "    2. /mybots yaz"
+    echo "    3. Botunu sec"
+    echo "    4. 'API Token' butonuna bas"
+    echo "    5. Cikan uzun metni KOPYALA (tamamini, basindan sonuna)"
     echo
     read -r -p "  Token'i yapistir: " TOKEN
     TOKEN="$(printf '%s' "$TOKEN" | tr -d '[:space:]')"
     if [ -z "$TOKEN" ]; then
         bad "Bos birakilamaz."
-        continue
     fi
 done
 
@@ -99,7 +147,8 @@ echo "      3. Bota herhangi bir mesaj yaz (ornegin: merhaba)"
 echo
 read -r -p "  Bunu yaptiktan sonra ENTER'a bas..." _
 
-UPD="$(api getUpdates)"
+UPD_RAW="$(api getUpdates)"
+UPD="${UPD_RAW%|*}"
 IDS="$(printf '%s' "$UPD" | python3 -c '
 import json, sys
 try:
