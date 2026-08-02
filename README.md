@@ -1,6 +1,6 @@
 # tradedair
 
-Bybit USDT-perpetual üzerinde çalışan, **destek/direnç kırılımı + retest + yol açıklığı**
+Bybit USDT-perpetual üzerinde çalışan, **4 saatlik mum genişlemesi**
 stratejisini uygulayan kaldıraçlı işlem botu.
 
 Temel: [freqtrade](https://github.com/freqtrade/freqtrade) · Kontrol: Telegram + FreqUI ·
@@ -8,55 +8,49 @@ Başlangıç modu: **test (dry-run)** — gerçek fiyat, sahte para.
 
 ---
 
-## Strateji
+## Strateji — CandleExpansion
 
-Bot her mumda destek/direnç seviyelerini yeniden hesaplar. Seviyeler, onaylanmış
-pivot (swing) noktalarının birbirine yakın olanlarının kümelenmesiyle bulunur;
-bir bölgeye ne kadar çok dokunulmuşsa seviye o kadar güçlüdür.
+Bir 4 saatlik mum kapanır, yönü ve gövde boyu ölçülür. Yeni mum **aynı yönde**
+ve o gövdenin **1.4 katı** kadar hareket ederse, tam o anda o yönde işleme girilir.
 
-### SHORT girişi
+```
+tetik_fiyat = yeni_acilis * (1 + 1.4 * onceki_hareket)
+```
 
-1. **Kırılım** — fiyat bir desteği aşağı kırar (marj + hacim onayı ile).
-2. **Retest** — fiyat kırılan desteğe geri döner; destek artık direnç görevi görür.
-3. **Ret** — o seviyeden reddedilir, tekrar altında ve düşüş mumu ile kapatır.
-4. **Yol açıklığı** — bir sonraki desteğe olan mesafe yeterince büyükse → **SHORT**.
+**Örnek:** önceki 4s mum %1 düştü → yeni mum kendi açılışından %1.4 düştüğü an
+**SHORT**. Önceki mum %1 yükseldiyse ve yeni mum %1.4 yükselirse **LONG**.
 
-### LONG girişi
+| | |
+|---|---|
+| Analiz | 4 saatlik mumlar |
+| Yürütme | 15 dakikalık (aşağıda neden) |
+| Tetik | önceki gövdenin 1.4 katı |
+| Stop | önceki mumun **açılışının** %0.5 ötesi |
+| Kâr al | %8 fiyat hareketi |
+| Kaldıraç | 8x |
+| Giriş sıklığı | her 4s mumda en fazla bir kez |
 
-Tam tersi: direnç yukarı kırılır → dirence retest → üstünde tutunur →
-bir sonraki dirence çok varsa → **LONG**.
+### Neden 15 dakikalık grafikte çalışıyor
 
-### Çıkış — üç kademeli takip eden stop
+Analiz 4 saatliktir ama giriş mumun **içinde**, fiyat tetiğe değdiği anda olmalı.
+Freqtrade 4 saatlik zaman diliminde çalışsaydı sadece mum kapanışlarında karar
+verir ve girişleri kaçırırdı. Bu yüzden 4 saatlik mumlar 15 dakikalık veriden
+türetiliyor ve tetik her 15 dakikada kontrol ediliyor.
 
-Stop sabit değil; işlem kâra geçtikçe arkadan sürüklenir, böylece kazanç geri
-verilmez. Eşikler **R** cinsinden — 1R = girişten yapısal stop'a olan mesafe,
-yani her işlemin kendi riski. Bu sayede her coin'de ve her volatilitede
-kendiliğinden ölçeklenir.
+Geleceğe bakma yok: her barda yalnızca **tamamlanmış** önceki 4 saatlik mum ve
+**içinde bulunulan** mumun açılışı kullanılıyor.
 
-| Kademe | Ne zaman | Stop nerede |
-|---|---|---|
-| **1. Yapısal** | giriş anında | kırılan seviyenin arkasında |
-| **2. Başabaş** | lehe 1R hareket | girişte — artık zarar edemez |
-| **3. Takip** | lehe 1.5R sonrası | görülen en iyi fiyatın 0.8R arkasında |
+### Risk (8x kaldıraçla)
 
-Stop asla gevşemez, sadece sıkılaşır.
+Stop, önceki mumun açılışına sabitlendiği için **stop mesafesi önceki mumun
+boyuna göre değişir** — büyük mum, uzak stop.
 
-**Kısmi kâr alma**: hedefe giden yolun yarısı katedilince pozisyonun %50'si
-kapatılır — kâr cebe girer. Kalan yarısı takip eden stop ile hedefe kadar
-koşmaya devam eder.
+Sentetik veride ölçülen: stop mesafesi medyan **%1.5 fiyat** (hesapta **%12**),
+en kötü durumda %7.2 fiyat (hesapta %58). Kâr hedefi %8 fiyat = hesapta %64.
+Risk/ödül medyan **5.2**, yani başabaş için **%16 kazanma oranı** yeterli.
 
-**Hedef**: bir sonraki destek/direnç. Yol bittiğinde tez de biter.
-
-**Risk/ödül filtresi**: hedef mesafesi / stop mesafesi oranı eşiğin altındaysa
-sinyal alınmaz. Yani "mesafe çok olmalı" kuralı hem mutlak yüzde hem de R/R
-olarak uygulanır.
-
-Örnek (testten): giriş 100, yapısal stop 98 (1R = %2). Fiyat 108'e (4R) çıkıp
-geri döndüğünde stop 106.27'ye taşınmış oluyor ve orada çıkılıyor —
-fiyat bazında **+%6.27**, 3x kaldıraçla hesapta **+%18.8**.
-
-Ayarlanabilir tüm parametreler `user_data/strategies/SupportResistanceBreakRetest.py`
-içinde en üstte, isimleriyle birlikte duruyor.
+`max_stop_pct` parametresi stop'un likidasyonun ötesine geçmesini engeller
+(8x'te likidasyon ~%12.5 fiyat hareketinde).
 
 ---
 
@@ -159,9 +153,10 @@ Canlıya geçerken:
 4. `stake_amount` ve `max_open_trades` değerlerini kaldırabileceğin kayba göre ayarla.
 5. `docker compose up -d --force-recreate`
 
-Kaldıraç `leverage_num` parametresiyle ayarlanır (varsayılan **3x**).
-Freqtrade'de stop değerleri kaldıraçlı hesaba göredir: 3x kaldıraçta
-%1'lik fiyat hareketi hesapta %3 eder.
+Kaldıraç `leverage_num` parametresiyle ayarlanır (varsayılan **8x**).
+Freqtrade'de stop değerleri kaldıraçlı hesaba göredir: 8x kaldıraçta
+%1'lik fiyat hareketi hesapta %8 eder. Tipik bir stop %1.5 fiyat =
+**hesapta %12 kayıp**; büyük mumlardan sonra bu %50'yi aşabilir.
 
 ---
 
@@ -171,52 +166,23 @@ Strateji kodu ağ erişimi olmadan test edilebilir:
 
 ```bash
 python scripts/gen_test_data.py        # sentetik OHLCV üretir
-python scripts/validate_strategy.py    # giriş mantığı — 3 test
-python scripts/validate_exits.py       # çıkış mantığı — takip eden stop + kısmi TP
+python scripts/validate_strategy.py    # 5 test
 ```
 
-### Giriş testleri (`validate_strategy.py`)
+Testler:
 
-1. **Sinyal üretimi** — kaç sinyal, ortalama yol açıklığı ve R/R.
-2. **Kural doğrulaması** — her sinyalin gerçekten kurallara uyduğu:
-   yol açıklığı ve R/R eşiklerini geçiyor mu, SHORT'ta stop kırılan desteğin
-   üstünde ve hedef altında mı, LONG'da tersi mi.
-3. **Geleceğe bakma testi** — en kritik olan. Veri her sinyal barında kesilip
-   yeniden hesaplanır; sinyal değişmemelidir. Değişiyorsa strateji geleceği
-   görüyordur ve backtest sonuçları yalandır.
+1. **Sinyal üretimi** — kaç giriş, hangi yönde
+2. **4 saatlik mum türetimi** — bağımsız bir resample ile birebir karşılaştırılır
+3. **Kural doğrulaması** — tetik formülü, yön, girişin gerçekten tetiğe
+   değdiğinde olması, stop'un doğru yerde ve doğru tarafta olması,
+   her mumda tek giriş
+4. **Risk profili** — stop mesafesi, hesaptaki kayıp, risk/ödül, başabaş oranı
+5. **Geleceğe bakma testi** — veri kesilip yeniden hesaplanır, sinyal değişmemeli
 
-Son çalıştırmada üçü de temiz geçti (255 sinyal, 40 barda 0 uyuşmazlık).
-
-### Çıkış testleri (`validate_exits.py`)
-
-Sahte bir işlem hayat döngüsü simüle eder ve doğrular:
-
-- stop hiçbir zaman gevşemiyor, sadece sıkılaşıyor
-- 1R'de başabaşa çekiliyor
-- 1.5R sonrası kârı kilitleyerek takip ediyor
-- fiyat geri çekilince takip eden stop kârda kapatıyor
-- kısmi kâr alma tam yolun yarısında, yalnızca bir kez tetikleniyor
-
-Long ve short için ayrı ayrı. Son çalıştırmada ikisi de geçti.
+Son çalıştırmada beşi de temiz geçti (3213 sinyal, 35 barda 0 uyuşmazlık).
 
 > Bu testler sentetik veriyle çalışır ve **mantığın doğruluğunu** kanıtlar,
 > kârlılığı değil. Kârlılık için gerçek Bybit verisiyle backtest gerekir (adım 3).
-
----
-
-## Önemli ayar: `require_next_level`
-
-Bir kırılım sonrası önde bilinen bir sonraki seviye **yoksa** ne yapılmalı?
-
-| Değer | Davranış |
-|---|---|
-| `False` (varsayılan) | "Önü açık" kabul edilir, hedef `max_room_pct`'e konur — daha çok sinyal, daha agresif |
-| `True` | Sinyal atlanır; sadece iki gerçek seviye arasında işlem açılır — daha az ama daha net sinyal |
-
-Sentetik testte bu ayar sinyal sayısını **255 → 27**'ye düşürdü, çünkü rastgele
-yürüyüş verisi sürekli yeni fiyat bölgelerine giriyor. Gerçek piyasada yapı daha
-oturmuş olduğu için fark bu kadar büyük olmayacaktır — ama **gerçek veriyle iki
-modu da backtest edip karşılaştırmanı öneririm.**
 
 ---
 

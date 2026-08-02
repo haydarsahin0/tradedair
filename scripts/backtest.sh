@@ -18,7 +18,7 @@ echo
 echo "=== Veri indiriliyor: $RANGE ==="
 if ! docker compose run --rm freqtrade download-data \
         --config "$CFG" \
-        --timeframes 1h \
+        --timeframes 15m \
         --timerange "$RANGE" \
         --trading-mode futures; then
     die "Veri indirilemedi. Yukaridaki hata mesajina bak."
@@ -34,7 +34,7 @@ echo
 echo "=== Backtest calisiyor ==="
 if ! docker compose run --rm freqtrade backtesting \
         --config "$CFG" \
-        --strategy SupportResistanceBreakRetest \
+        --strategy CandleExpansion \
         --timerange "$RANGE" \
         --breakdown month; then
     die "Backtest basarisiz. Yukaridaki hata mesajina bak."

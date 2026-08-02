@@ -31,7 +31,7 @@ echo
 
 if ! docker compose run --rm freqtrade hyperopt \
         --config "$CFG" \
-        --strategy SupportResistanceBreakRetest \
+        --strategy CandleExpansion \
         --hyperopt-loss SharpeHyperOptLoss \
         --spaces buy sell \
         --timerange "$TRAIN" \
@@ -48,14 +48,14 @@ echo
 
 docker compose run --rm freqtrade backtesting \
     --config "$CFG" \
-    --strategy SupportResistanceBreakRetest \
+    --strategy CandleExpansion \
     --timerange "$TEST" \
     --breakdown month
 
 python3 scripts/notify_backtest.py || true
 
 echo
-echo "En iyi parametreler user_data/strategies/SupportResistanceBreakRetest.json"
+echo "En iyi parametreler user_data/strategies/CandleExpansion.json"
 echo "dosyasina yazildi ve bundan sonra otomatik kullanilir."
 echo
 echo "Egitim ve dogrulama sonuclari BIRBIRINE YAKINSA strateji saglamdir."

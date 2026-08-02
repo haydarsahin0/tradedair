@@ -1,12 +1,16 @@
 """
-Strateji mantığı doğrulama harness'ı (ağ erişimi gerektirmez).
+CandleExpansion stratejisinin doğrulaması (ağ erişimi gerektirmez).
 
-İki şeyi test eder:
-  1. Sinyaller üretiliyor mu, ve üretilen sinyaller kuralların gerektirdiği
-     özellikleri (yol açıklığı, R/R, stop yönü) taşıyor mu?
-  2. GELECEĞE BAKMA VAR MI — en kritik test. Veriyi t barında kesip yeniden
-     hesaplarsak, t'deki sinyal aynı çıkıyor mu? Çıkmıyorsa strateji
-     geleceği görüyordur ve backtest sonuçları yalandır.
+Kontrol edilenler:
+  1. 4 saatlik mumlar 15 dakikalık veriden DOĞRU türetiliyor mu
+     (bağımsız bir resample ile karşılaştırılır)
+  2. Tetik fiyatı kurala uyuyor mu:  tetik = yeni_acilis * (1 + 1.4 * onceki_hareket)
+  3. Girişler gerçekten fiyat tetiğe değdiğinde mi oluyor
+  4. Yön doğru mu (önceki mum düşüşse SHORT, yükselişse LONG)
+  5. Stop doğru yerde mi (önceki mumun açılışının %0.5 ötesi, doğru tarafta)
+  6. Her 4 saatlik mumda en fazla BİR giriş var mı
+  7. GELECEĞE BAKMA var mı — veri kesilip yeniden hesaplandığında
+     sinyal değişiyor mu
 """
 import sys
 from pathlib import Path
@@ -17,172 +21,221 @@ import pandas as pd
 sys.path.insert(0, "/home/user/tradedair/user_data/strategies")
 
 from freqtrade.enums import RunMode  # noqa: E402
-from SupportResistanceBreakRetest import SupportResistanceBreakRetest  # noqa: E402
+
+from CandleExpansion import CandleExpansion  # noqa: E402
 
 DATA = Path("/home/user/tradedair/user_data/data/bybit/futures")
 
-CONFIG = {
+CFG = {
     "stake_currency": "USDT",
     "stake_amount": 100,
     "runmode": RunMode.BACKTEST,
     "trading_mode": "futures",
     "margin_mode": "isolated",
-    "timeframe": "1h",
+    "timeframe": "15m",
     "exchange": {"name": "bybit"},
 }
 
 
 def load(pair: str) -> pd.DataFrame:
-    return pd.read_feather(DATA / f"{pair}-1h-futures.feather")
+    return pd.read_feather(DATA / f"{pair}-15m-futures.feather")
 
 
-def analyse(strat, df: pd.DataFrame) -> pd.DataFrame:
+def analyse(strat, df):
     d = strat.populate_indicators(df.copy(), {"pair": "TEST/USDT:USDT"})
-    d = strat.populate_entry_trend(d, {"pair": "TEST/USDT:USDT"})
-    return d
+    return strat.populate_entry_trend(d, {"pair": "TEST/USDT:USDT"})
+
+
+def col(d, name):
+    return d[name].fillna(0) if name in d else pd.Series(0, index=d.index)
+
+
+def sig(row, name) -> float:
+    """
+    Tek bir satirdaki sinyal degeri.
+
+    DIKKAT: sinyalsiz barlarda deger NaN'dir ve NaN == NaN her zaman False'tur.
+    Ayrica `nan or 0` ifadesi 0 degil NaN dondurur (NaN "truthy"dir). Bu yuzden
+    karsilastirmadan once NaN'i acikca 0'a cevirmek gerekir.
+    """
+    v = row.get(name)
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    return 0.0 if np.isnan(v) else v
 
 
 def main() -> int:
-    strat = SupportResistanceBreakRetest(CONFIG)
-    pairs = ["BTC_USDT_USDT", "ETH_USDT_USDT", "SOL_USDT_USDT",
-             "BNB_USDT_USDT", "XRP_USDT_USDT"]
+    strat = CandleExpansion(CFG)
+    mult = float(strat.expansion_mult.value)
+    sb = float(strat.stop_beyond_open_pct.value) / 100.0
+    tp = float(strat.take_profit_pct.value)
+    lev = float(strat.leverage_num.value)
 
-    print("=" * 68)
-    print("1) SİNYAL ÜRETİMİ")
-    print("=" * 68)
-
-    total_l = total_s = 0
-    all_rooms, all_rrs = [], []
+    pairs = ["BTC_USDT_USDT", "ETH_USDT_USDT", "SOL_USDT_USDT", "BNB_USDT_USDT"]
+    ok = True
     frames = {}
 
+    print("=" * 70)
+    print("1) SINYAL URETIMI")
+    print(f"   tetik={mult}x   stop=onceki acilis +-%{sb*100:.2f}   "
+          f"TP=%{tp}   kaldirac={lev:.0f}x")
+    print("=" * 70)
+
+    tot_l = tot_s = 0
     for p in pairs:
-        df = load(p)
-        d = analyse(strat, df)
+        d = analyse(strat, load(p))
         frames[p] = d
+        nl = int(col(d, "enter_long").sum())
+        ns = int(col(d, "enter_short").sum())
+        tot_l += nl
+        tot_s += ns
+        np_ = d["period"].nunique()
+        print(f"  {p:16s} long={nl:4d}  short={ns:4d}   "
+              f"({np_} adet 4s mumu, giris orani %{(nl+ns)/np_*100:.1f})")
+    print(f"\n  TOPLAM: {tot_l} long, {tot_s} short")
 
-        longs = int(d["enter_long"].fillna(0).sum()) if "enter_long" in d else 0
-        shorts = int(d["enter_short"].fillna(0).sum()) if "enter_short" in d else 0
-        total_l += longs
-        total_s += shorts
+    # ---------------- 4 saatlik mum türetimi ---------------- #
+    print("\n" + "=" * 70)
+    print("2) 4 SAATLIK MUM TURETIMI DOGRU MU")
+    print("=" * 70)
 
-        sig = d[d["sig_long"] | d["sig_short"]]
-        rooms = sig["sr_room"].dropna()
-        rrs = sig["sr_rr"].dropna()
-        all_rooms.extend(rooms.tolist())
-        all_rrs.extend(rrs.tolist())
+    raw = load("BTC_USDT_USDT").set_index("date")
+    ref = raw.resample("4h").agg({"open": "first", "close": "last"}).dropna()
+    d = frames["BTC_USDT_USDT"]
 
-        print(f"  {p:16s} long={longs:4d}  short={shorts:4d}  "
-              f"ort.yol={rooms.mean():5.2f}%  ort.R/R={rrs.mean():4.2f}"
-              if len(rooms) else
-              f"  {p:16s} long={longs:4d}  short={shorts:4d}  (sinyal yok)")
+    chk = d.dropna(subset=["prev_open", "prev_close"]).copy()
+    exp_open = chk["period"].map(ref["open"].shift(1))
+    exp_close = chk["period"].map(ref["close"].shift(1))
+    do = (chk["prev_open"] - exp_open).abs().max()
+    dc = (chk["prev_close"] - exp_close).abs().max()
 
-    print(f"\n  TOPLAM: {total_l} long, {total_s} short  "
-          f"({total_l + total_s} sinyal / {len(pairs) * 14592} mum)")
-    if all_rooms:
-        print(f"  Yol açıklığı: min={min(all_rooms):.2f}%  "
-              f"medyan={np.median(all_rooms):.2f}%  max={max(all_rooms):.2f}%")
-        print(f"  Risk/Ödül   : min={min(all_rrs):.2f}  "
-              f"medyan={np.median(all_rrs):.2f}  max={max(all_rrs):.2f}")
+    if do < 1e-6 and dc < 1e-6:
+        print("  ✓ Onceki 4s mumunun acilis/kapanisi bagimsiz resample ile birebir ayni")
+        print(f"    ({len(ref)} adet 4s mumu karsilastirildi)")
+    else:
+        print(f"  ✗ Uyusmazlik: acilis {do:.8f}, kapanis {dc:.8f}")
+        ok = False
 
     # ---------------- Kural doğrulaması ---------------- #
-    print("\n" + "=" * 68)
-    print("2) KURAL DOĞRULAMASI")
-    print("=" * 68)
-
-    min_room = float(strat.min_room_pct.value)
-    min_rr = float(strat.min_rr.value)
-    ok = True
+    print("\n" + "=" * 70)
+    print("3) KURAL DOGRULAMASI")
+    print("=" * 70)
 
     for p, d in frames.items():
-        sig = d[d["sig_long"] | d["sig_short"]]
-        if sig.empty:
+        e = d[(col(d, "enter_long") == 1) | (col(d, "enter_short") == 1)]
+        if e.empty:
             continue
 
-        if (sig["sr_room"] < min_room - 1e-9).any():
-            print(f"  ✗ {p}: min yol açıklığı ihlali")
-            ok = False
-        if (sig["sr_rr"] < min_rr - 1e-9).any():
-            print(f"  ✗ {p}: min R/R ihlali")
+        want = e["cur_open"] * (1 + mult * e["prev_move"])
+        if (want - e["trigger"]).abs().max() > 1e-6:
+            print(f"  ✗ {p}: tetik fiyati formule uymuyor")
             ok = False
 
-        s = sig[sig["sig_short"]]
+        s = e[col(e, "enter_short") == 1]
         if not s.empty:
-            if not (s["sr_stop"] > s["close"]).all():
-                print(f"  ✗ {p}: SHORT stop'u fiyatın altında kalmış")
+            if not (s["prev_move"] < 0).all():
+                print(f"  ✗ {p}: SHORT girisi yukselen onceki mumda acilmis")
                 ok = False
-            if not (s["sr_target"] < s["close"]).all():
-                print(f"  ✗ {p}: SHORT hedefi fiyatın üstünde")
+            if not (s["low"] <= s["trigger"] + 1e-9).all():
+                print(f"  ✗ {p}: SHORT fiyat tetige degmeden acilmis")
                 ok = False
-            if not (s["close"] < s["sr_broken"]).all():
-                print(f"  ✗ {p}: SHORT girişi kırılan desteğin üstünde kapatmış")
+            if not (s["stop_short"] > s["trigger"]).all():
+                print(f"  ✗ {p}: SHORT stop'u girisin altinda kalmis")
+                ok = False
+            if (s["stop_short"] - s["prev_open"] * (1 + sb)).abs().max() > 1e-6:
+                print(f"  ✗ {p}: SHORT stop'u onceki acilisin %{sb*100} otesinde degil")
                 ok = False
 
-        lg = sig[sig["sig_long"]]
+        lg = e[col(e, "enter_long") == 1]
         if not lg.empty:
-            if not (lg["sr_stop"] < lg["close"]).all():
-                print(f"  ✗ {p}: LONG stop'u fiyatın üstünde kalmış")
+            if not (lg["prev_move"] > 0).all():
+                print(f"  ✗ {p}: LONG girisi dusen onceki mumda acilmis")
                 ok = False
-            if not (lg["sr_target"] > lg["close"]).all():
-                print(f"  ✗ {p}: LONG hedefi fiyatın altında")
+            if not (lg["high"] >= lg["trigger"] - 1e-9).all():
+                print(f"  ✗ {p}: LONG fiyat tetige degmeden acilmis")
                 ok = False
-            if not (lg["close"] > lg["sr_broken"]).all():
-                print(f"  ✗ {p}: LONG girişi kırılan direncin altında kapatmış")
+            if not (lg["stop_long"] < lg["trigger"]).all():
+                print(f"  ✗ {p}: LONG stop'u girisin ustunde kalmis")
                 ok = False
+            if (lg["stop_long"] - lg["prev_open"] * (1 - sb)).abs().max() > 1e-6:
+                print(f"  ✗ {p}: LONG stop'u onceki acilisin %{sb*100} otesinde degil")
+                ok = False
+
+        per_counts = e.groupby("period").size()
+        if (per_counts > 1).any():
+            print(f"  ✗ {p}: {int((per_counts>1).sum())} mumda birden fazla giris")
+            ok = False
 
     if ok:
-        print("  ✓ Tüm sinyaller kurallara uyuyor:")
-        print(f"    - yol açıklığı >= %{min_room}")
-        print(f"    - risk/ödül >= {min_rr}")
-        print("    - SHORT: stop kırılan desteğin üstünde, hedef altında")
-        print("    - LONG : stop kırılan direncin altında, hedef üstünde")
+        print("  ✓ Tetik fiyati formule birebir uyuyor")
+        print("  ✓ Yon dogru: dusen onceki mumda SHORT, yukselende LONG")
+        print("  ✓ Girisler fiyat tetige gercekten degdiginde olmus")
+        print(f"  ✓ Stop tam olarak onceki mumun acilisinin %{sb*100} otesinde")
+        print("  ✓ Stop dogru tarafta (SHORT'ta ustte, LONG'da altta)")
+        print("  ✓ Her 4 saatlik mumda en fazla bir giris")
 
-    # ---------------- Geleceğe bakma testi ---------------- #
-    print("\n" + "=" * 68)
-    print("3) GELECEĞE BAKMA (LOOKAHEAD) TESTİ")
-    print("=" * 68)
-    print("  Veri t barında kesilip yeniden hesaplanıyor; sinyal değişmemeli.")
+    # ---------------- Risk profili ---------------- #
+    print("\n" + "=" * 70)
+    print(f"4) RISK PROFILI ({lev:.0f}x kaldiracla)")
+    print("=" * 70)
+
+    dists = []
+    for p, d in frames.items():
+        e = d[(col(d, "enter_long") == 1) | (col(d, "enter_short") == 1)]
+        for _, r in e.iterrows():
+            if r.get("enter_short", 0) == 1:
+                dists.append((r["stop_short"] - r["trigger"]) / r["trigger"] * 100)
+            else:
+                dists.append((r["trigger"] - r["stop_long"]) / r["trigger"] * 100)
+
+    if dists:
+        a = np.array(dists)
+        med = float(np.median(a))
+        print(f"  Stop mesafesi (fiyat) : medyan %{med:.2f}   "
+              f"min %{a.min():.2f}   max %{a.max():.2f}")
+        print(f"  Hesaptaki kayip       : medyan %{med*lev:.1f}   max %{a.max()*lev:.1f}")
+        print(f"  Kar hedefi            : %{tp} fiyat  =  hesapta %{tp*lev:.0f}")
+        print(f"  Risk/Odul (medyan)    : {tp/med:.2f}")
+        print(f"  Basabas icin gereken kazanma orani: %{100/(1+tp/med):.1f}")
+
+    # ---------------- Geleceğe bakma ---------------- #
+    print("\n" + "=" * 70)
+    print("5) GELECEGE BAKMA (LOOKAHEAD) TESTI")
+    print("=" * 70)
 
     df = load("BTC_USDT_USDT")
     full = frames["BTC_USDT_USDT"]
-    sig_idx = full.index[(full["sig_long"] | full["sig_short"])].tolist()
+    sig_idx = full.index[(col(full, "enter_long") == 1)
+                         | (col(full, "enter_short") == 1)].tolist()
 
     rng = np.random.default_rng(42)
-    if len(sig_idx) > 25:
-        sample = sorted(rng.choice(sig_idx, 25, replace=False).tolist())
-    else:
-        sample = sig_idx
-
-    # Sinyalsiz barlardan da örnek al (yanlış pozitif üretmemeli)
-    nosig = [i for i in range(2000, len(full)) if i not in set(sig_idx)]
+    sample = sorted(rng.choice(sig_idx, min(20, len(sig_idx)), replace=False).tolist())
+    nosig = [i for i in range(500, len(full)) if i not in set(sig_idx)]
     sample += sorted(rng.choice(nosig, 15, replace=False).tolist())
 
-    mismatches = 0
-    checked = 0
+    mism = 0
     for t in sample:
-        truncated = df.iloc[: t + 1].copy().reset_index(drop=True)
-        d2 = analyse(strat, truncated)
+        d2 = analyse(strat, df.iloc[: t + 1].copy().reset_index(drop=True))
         last = d2.iloc[-1]
         exp = full.iloc[t]
+        same_l = sig(last, "enter_long") == sig(exp, "enter_long")
+        same_s = sig(last, "enter_short") == sig(exp, "enter_short")
+        if not (same_l and same_s):
+            mism += 1
+            if mism <= 5:
+                print(f"    ✗ bar {t} ({exp['date']}) uyusmadi")
 
-        same_long = bool(last["sig_long"]) == bool(exp["sig_long"])
-        same_short = bool(last["sig_short"]) == bool(exp["sig_short"])
-        checked += 1
-        if not (same_long and same_short):
-            mismatches += 1
-            if mismatches <= 5:
-                print(f"    ✗ bar {t} ({exp['date']}): "
-                      f"tam veri L={bool(exp['sig_long'])}/S={bool(exp['sig_short'])} "
-                      f"vs kesik L={bool(last['sig_long'])}/S={bool(last['sig_short'])}")
-
-    print(f"\n  {checked} bar kontrol edildi, {mismatches} uyuşmazlık.")
-    if mismatches == 0:
-        print("  ✓ GELECEĞE BAKMA YOK — strateji sadece geçmiş veriyi kullanıyor.")
+    print(f"\n  {len(sample)} bar kontrol edildi, {mism} uyusmazlik.")
+    if mism == 0:
+        print("  ✓ GELECEGE BAKMA YOK — strateji sadece gecmis veriyi kullaniyor")
     else:
-        print("  ✗ GELECEĞE BAKMA TESPİT EDİLDİ — backtest sonuçlarına güvenilmez!")
+        print("  ✗ GELECEGE BAKMA TESPIT EDILDI")
         ok = False
 
     print()
-    return 0 if (ok and mismatches == 0) else 1
+    return 0 if (ok and mism == 0) else 1
 
 
 if __name__ == "__main__":

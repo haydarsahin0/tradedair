@@ -20,9 +20,9 @@ PAIRS = {
     "XRP_USDT_USDT": 2.3,
 }
 
-START = pd.Timestamp("2024-12-01", tz="UTC")
+START = pd.Timestamp("2025-06-01", tz="UTC")
 END = pd.Timestamp("2026-08-01", tz="UTC")
-idx = pd.date_range(START, END, freq="1h", inclusive="left")
+idx = pd.date_range(START, END, freq="15min", inclusive="left")
 N = len(idx)
 
 
@@ -34,14 +34,14 @@ def make_series(seed: int, start_price: float) -> pd.DataFrame:
     drift = np.zeros(N)
     t = 0
     while t < N:
-        length = int(rng.integers(120, 600))
+        length = int(rng.integers(480, 2400))
         is_trend = rng.random() < 0.40
-        d = rng.normal(0, 0.0016) if is_trend else 0.0
+        d = rng.normal(0, 0.0005) if is_trend else 0.0
         regime[t:t + length] = 1 if is_trend else 0
         drift[t:t + length] = d
         t += length
 
-    vol = 0.0045
+    vol = 0.0022
     logp = np.zeros(N)
     logp[0] = np.log(start_price)
     anchor = logp[0]
@@ -50,7 +50,7 @@ def make_series(seed: int, start_price: float) -> pd.DataFrame:
         shock = rng.normal(0, vol)
         if regime[i] == 0:
             # yatay: çapaya geri çekilir -> net destek/direnç oluşur
-            pull = -0.03 * (logp[i - 1] - anchor)
+            pull = -0.01 * (logp[i - 1] - anchor)
             logp[i] = logp[i - 1] + pull + shock
         else:
             logp[i] = logp[i - 1] + drift[i] + shock
@@ -81,7 +81,7 @@ def make_series(seed: int, start_price: float) -> pd.DataFrame:
 
 for seed, (pair, price) in enumerate(PAIRS.items()):
     df = make_series(seed + 7, price)
-    df.to_feather(OUT / f"{pair}-1h-futures.feather", compression="lz4")
+    df.to_feather(OUT / f"{pair}-15m-futures.feather", compression="lz4")
 
     # Funding rate (8 saatlik)
     f_idx = pd.date_range(START, END, freq="8h", inclusive="left")
