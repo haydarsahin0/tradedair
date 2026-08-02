@@ -138,11 +138,19 @@ class SupportResistanceBreakRetest(IStrategy):
     # lookback + pivot penceresi kadar ısınma gerekiyor
     startup_candle_count: int = 400
 
+    # stoploss_on_exchange: stop emri doğrudan Bybit'e gönderilir ve orada durur.
+    # Sunucu çökse, internet gitse, bot kapansa bile stop borsada aktif kalır.
+    # Kaldıraçlı işlemde bu bir lüks değil, zorunluluk.
+    #
+    # Takip eden stop ile uyumlu: stop seviyesi değiştikçe freqtrade borsadaki
+    # emri iptal edip yenisini kurar (stoploss_on_exchange_interval saniyede bir).
     order_types = {
         "entry": "limit",
         "exit": "limit",
         "stoploss": "market",
-        "stoploss_on_exchange": False,
+        "stoploss_on_exchange": True,
+        "stoploss_on_exchange_interval": 60,
+        "stoploss_on_exchange_market_ratio": 0.99,
     }
 
     order_time_in_force = {"entry": "GTC", "exit": "GTC"}
