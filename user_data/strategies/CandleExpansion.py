@@ -23,7 +23,7 @@ KURAL
        SHORT -> onceki_acilis * 1.005
        LONG  -> onceki_acilis * 0.995
 
-4. KAR AL: %4  (fiyat hareketi; 8x kaldiracla hesapta ~%32)
+4. KAR AL: %9  (fiyat hareketi; 8x kaldiracla hesapta ~%72)
 
 5. Kaldıraç: 8x
 
@@ -106,16 +106,21 @@ class CandleExpansion(IStrategy):
     # Stop: önceki mumun açılışından ne kadar öte
     stop_beyond_open_pct = DecimalParameter(0.1, 2.0, default=0.5, decimals=2, space="sell")
 
-    # Kâr hedefi
     # Kâr hedefi — FİYAT hareketi olarak (8x kaldıraçla hesapta 8 katı eder).
     #
-    # %8 -> hesapta ~%64.  Bu ayarla olculen: kazanma orani %23.3,
-    #       ortalama kazanc +%66.51, ortalama kayip -%17.99  -> +1.70/islem
-    # %4 -> hesapta ~%32.  Ortalama kazanc yariya inecegi icin basabas
-    #       kazanma orani %21.3'ten %35.1'e cikar. Hedef yakinlastigi icin
-    #       kazanma oraninin da yukselmesi beklenir; yeterince yukselip
-    #       yukselmedigini backtest soyleyecek.
-    take_profit_pct = DecimalParameter(2.0, 20.0, default=4.0, decimals=1, space="sell")
+    # OLCULEN:
+    #   %8 -> kazanma orani %23.3 | basabas gereken %21.3 | beklenen +1.71  KARLI
+    #   %4 -> kazanma orani %32.0 | basabas gereken %35.1 | beklenen -1.58  ZARARLI
+    #
+    # Hedefi yariya indirmek kazanma oranini %23.3'ten sadece %32'ye tasidi;
+    # gereken %35.1 idi. Rastgele yuruyus modeli stop/(stop+hedef) ile
+    # kiyaslandiginda TP4 modelin ALTINDA, TP8 modelin USTUNDE kaliyor.
+    #
+    # Anlami: kazananlar hedefe zar zor degip donmuyor, cok daha uzaga
+    # gidiyor. Bu stratejinin kenari KALIN SAG KUYRUKTA. Kucuk hedef o
+    # kuyrugu kesip kenari yok ediyor — bu yuzden hedefi buyuk tutmak
+    # dogru yon.
+    take_profit_pct = DecimalParameter(2.0, 20.0, default=9.0, decimals=1, space="sell")
 
     # Kâr hedefi FİYAT hareketi mi, yoksa kaldıraçlı hesap kârı mı?
     #   False -> %8 FİYAT hareketi  (8x kaldıraçla hesapta ~%64)

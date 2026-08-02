@@ -26,7 +26,7 @@ tetik_fiyat = yeni_acilis * (1 + 1.4 * onceki_hareket)
 | Yürütme | 15 dakikalık (aşağıda neden) |
 | Tetik | önceki gövdenin 1.4 katı |
 | Stop | önceki mumun **açılışının** %0.5 ötesi |
-| Kâr al | %4 fiyat hareketi (hesapta ~%32) |
+| Kâr al | %9 fiyat hareketi (hesapta ~%72) |
 | Kaldıraç | 8x |
 | Kasa | 500 USDT |
 | Aynı anda işlem | 3 |
@@ -49,7 +49,7 @@ Stop, önceki mumun açılışına sabitlendiği için **stop mesafesi önceki m
 boyuna göre değişir** — büyük mum, uzak stop.
 
 Sentetik veride ölçülen: stop mesafesi medyan **%1.5 fiyat** (hesapta **%12**),
-en kötü durumda %7.2 fiyat (hesapta %58). Kâr hedefi %4 fiyat = hesapta %32.
+en kötü durumda %7.2 fiyat (hesapta %58). Kâr hedefi %9 fiyat = hesapta %72.
 Risk/ödül medyan **5.2**, yani başabaş için **%16 kazanma oranı** yeterli.
 
 `max_stop_pct` parametresi stop'un likidasyonun ötesine geçmesini engeller
