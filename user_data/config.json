@@ -40,7 +40,12 @@
         "secret": "",
         "ccxt_config": {},
         "ccxt_async_config": {},
-        "pair_whitelist": [],
+        "pair_whitelist": [
+            "BTC/USDT:USDT",
+            "ETH/USDT:USDT",
+            "SOL/USDT:USDT",
+            "BNB/USDT:USDT"
+        ],
         "pair_blacklist": [
             "(USDC|USDE|USDD|USDP|USDS|USD1|FDUSD|TUSD|BUSD|DAI|PYUSD|RLUSD|LUSD|FRAX|GUSD|SUSD|USTC|EURT|EURS|EURI|XAUT|PAXG)/.*",
             ".*(3L|3S|5L|5S|UP|DOWN)/.*",
@@ -49,30 +54,7 @@
     },
     "pairlists": [
         {
-            "method": "VolumePairList",
-            "number_assets": 50,
-            "sort_key": "quoteVolume",
-            "min_value": 0,
-            "refresh_period": 1800
-        },
-        {
-            "method": "AgeFilter",
-            "min_days_listed": 30
-        },
-        {
-            "method": "PriceFilter",
-            "low_price_ratio": 0.01
-        },
-        {
-            "method": "SpreadFilter",
-            "max_spread_ratio": 0.005
-        },
-        {
-            "method": "VolatilityFilter",
-            "lookback_days": 10,
-            "min_volatility": 0.01,
-            "max_volatility": 0.75,
-            "refresh_period": 3600
+            "method": "StaticPairList"
         }
     ],
     "telegram": {
