@@ -28,6 +28,9 @@ tetik_fiyat = yeni_acilis * (1 + 1.4 * onceki_hareket)
 | Stop | önceki mumun **açılışının** %0.5 ötesi |
 | Kâr al | %8 fiyat hareketi |
 | Kaldıraç | 8x |
+| Kasa | 500 USDT |
+| Aynı anda işlem | 5 |
+| İşlem başına | 50 USDT (sermayenin %50'si kullanımda) |
 | Giriş sıklığı | her 4s mumda en fazla bir kez |
 
 ### Neden 15 dakikalık grafikte çalışıyor

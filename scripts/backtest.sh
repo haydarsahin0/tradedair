@@ -25,10 +25,10 @@ if ! docker compose run --rm freqtrade download-data \
 fi
 
 # Veri gercekten indi mi? (freqtrade bazen hata verip 0 donebiliyor)
-if ! ls user_data/data/bybit/futures/*-1h-futures.feather >/dev/null 2>&1; then
+if ! ls user_data/data/bybit/futures/*-15m-futures.feather >/dev/null 2>&1; then
     die "Veri dosyalari olusmadi. Borsa baglantisini ve tarih araligini kontrol et."
 fi
-echo "  -> $(ls user_data/data/bybit/futures/*-1h-futures.feather | wc -l) cift icin veri hazir"
+echo "  -> $(ls user_data/data/bybit/futures/*-15m-futures.feather | wc -l) cift icin veri hazir"
 
 echo
 echo "=== Backtest calisiyor ==="
