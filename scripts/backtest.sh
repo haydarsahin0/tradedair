@@ -16,7 +16,7 @@ die() { printf '\n\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
 
 echo
 echo "=== Veri indiriliyor: $RANGE ==="
-if ! docker compose run --rm freqtrade download-data \
+if ! docker compose run --rm -e FREQTRADE__DRY_RUN=true freqtrade download-data \
         --config "$CFG" \
         --timeframes 15m \
         --timerange "$RANGE" \
@@ -32,7 +32,7 @@ echo "  -> $(ls user_data/data/bybit/futures/*-15m-futures.feather | wc -l) cift
 
 echo
 echo "=== Backtest calisiyor ==="
-if ! docker compose run --rm freqtrade backtesting \
+if ! docker compose run --rm -e FREQTRADE__DRY_RUN=true freqtrade backtesting \
         --config "$CFG" \
         --strategy CandleExpansion \
         --timerange "$RANGE" \
@@ -46,4 +46,4 @@ python3 scripts/notify_backtest.py || true
 echo
 echo "Sonuclar user_data/backtest_results/ altinda kayitli."
 echo "Detayli islem listesi icin:"
-echo "  docker compose run --rm freqtrade backtesting-show --config $CFG"
+echo "  docker compose run --rm -e FREQTRADE__DRY_RUN=true freqtrade backtesting-show --config $CFG"

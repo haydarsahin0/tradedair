@@ -140,7 +140,6 @@ esac
 # ---------------------------------------------------------------- #
 bold "2/6  Islem buyuklugu"
 
-CFG=user_data/config.json
 KASA="${BAKIYE%%.*}"
 [ -n "$KASA" ] && [ "$KASA" -gt 0 ] 2>/dev/null || KASA=500
 
@@ -161,30 +160,21 @@ echo
 echo "  Dusuk kullanim = daha az getiri AMA daha az dusus."
 echo "  Birim risk basina verim hepsinde ayni."
 echo
-CUR="$(python3 -c "import json;print(json.load(open('$CFG'))['stake_amount'])")"
+CUR="${STAKE_AMOUNT:-100}"
 read -r -p "  Islem basina kac USDT? (bos = mevcut $CUR): " STK
 if [ -n "$STK" ]; then
-    python3 - "$CFG" "$STK" "$KASA" <<'PY'
-import json, sys
-p, stk, kasa = sys.argv[1], int(float(sys.argv[2])), int(sys.argv[3])
-c = json.load(open(p))
-c["stake_amount"] = stk
-c["dry_run_wallet"] = kasa
-json.dump(c, open(p, "w"), indent=4, ensure_ascii=False)
-open(p, "a").write("\n")
-PY
+    set_env STAKE_AMOUNT "$STK"
     ok "Islem basina $STK USDT olarak ayarlandi"
+else
+    STK="$CUR"
 fi
+set_env DRY_RUN_WALLET "$KASA"
 
 echo
-python3 - "$CFG" <<'PY'
-import json, sys
-c = json.load(open(sys.argv[1]))
-dep = c['stake_amount'] * c['max_open_trades']
-print(f"  Ayni anda islem  : {c['max_open_trades']}")
-print(f"  Islem basina     : {c['stake_amount']} USDT")
-print(f"  Sermaye kullanimi: {dep} USDT")
-PY
+MOT="${MAX_OPEN_TRADES:-3}"
+echo "  Ayni anda islem  : $MOT"
+echo "  Islem basina     : $STK USDT"
+echo "  Sermaye kullanimi: $((MOT * STK)) USDT"
 echo "  Kaldirac         : 8x"
 echo "  Kar hedefi       : %9 fiyat (hesapta ~%72)"
 
@@ -213,14 +203,7 @@ read -r -p "  Yukaridakileri okudum, gercek parayla baslat (EVET yaz): " a
 
 # ---------------------------------------------------------------- #
 bold "5/6  dry_run kapatiliyor"
-python3 - "$CFG" <<'PY'
-import json, sys
-p = sys.argv[1]
-c = json.load(open(p))
-c["dry_run"] = False
-json.dump(c, open(p, "w"), indent=4, ensure_ascii=False)
-open(p, "a").write("\n")
-PY
+set_env DRY_RUN false
 ok "dry_run = false  (artik gercek emir gonderilecek)"
 
 # ---------------------------------------------------------------- #

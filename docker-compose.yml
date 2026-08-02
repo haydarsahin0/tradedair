@@ -28,6 +28,13 @@ services:
       # Canlıya geçince doldurulur; test modunda boş kalabilir.
       - FREQTRADE__EXCHANGE__KEY=${BYBIT_API_KEY}
       - FREQTRADE__EXCHANGE__SECRET=${BYBIT_API_SECRET}
+      # ÇALIŞMA ANINDA DEĞİŞEN AYARLAR — .env'den gelir, config.json'a
+      # dokunulmaz. Böylece "git pull" hiçbir zaman çakışmaz.
+      # .env'de tanımlı değilse aşağıdaki varsayılanlar kullanılır.
+      - FREQTRADE__DRY_RUN=${DRY_RUN:-true}
+      - FREQTRADE__STAKE_AMOUNT=${STAKE_AMOUNT:-100}
+      - FREQTRADE__MAX_OPEN_TRADES=${MAX_OPEN_TRADES:-3}
+      - FREQTRADE__DRY_RUN_WALLET=${DRY_RUN_WALLET:-500}
     command: >
       trade
       --config /freqtrade/user_data/config.json

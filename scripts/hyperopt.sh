@@ -29,7 +29,7 @@ echo "=== 1/2  EGITIM donemi optimizasyonu: $TRAIN ($EPOCHS deneme) ==="
 echo "    Bu uzun surer — kucuk sunucuda 1-3 saat."
 echo
 
-if ! docker compose run --rm freqtrade hyperopt \
+if ! docker compose run --rm -e FREQTRADE__DRY_RUN=true freqtrade hyperopt \
         --config "$CFG" \
         --strategy CandleExpansion \
         --hyperopt-loss SharpeHyperOptLoss \
@@ -46,7 +46,7 @@ echo "=== 2/2  DOGRULAMA — hic optimize edilmemis donem: $TEST ==="
 echo "    Buradaki sonuc gercege daha yakindir."
 echo
 
-docker compose run --rm freqtrade backtesting \
+docker compose run --rm -e FREQTRADE__DRY_RUN=true freqtrade backtesting \
     --config "$CFG" \
     --strategy CandleExpansion \
     --timerange "$TEST" \
