@@ -2,7 +2,15 @@ services:
   freqtrade:
     image: freqtradeorg/freqtrade:stable
     container_name: tradedair
+    # unless-stopped: cokerse yeniden baslar, sunucu yeniden baslarsa da
+    # kendiliginden ayaga kalkar. Sadece sen elle durdurursan durur.
     restart: unless-stopped
+    # Log dosyalari 25 GB'lik diski doldurmasin — dolarsa bot durur.
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
     volumes:
       - "./user_data:/freqtrade/user_data"
     ports:
