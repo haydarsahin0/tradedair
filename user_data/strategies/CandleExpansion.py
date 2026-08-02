@@ -23,7 +23,7 @@ KURAL
        SHORT -> onceki_acilis * 1.005
        LONG  -> onceki_acilis * 0.995
 
-4. KAR AL: %8
+4. KAR AL: %4  (fiyat hareketi; 8x kaldiracla hesapta ~%32)
 
 5. Kaldıraç: 8x
 
@@ -107,7 +107,15 @@ class CandleExpansion(IStrategy):
     stop_beyond_open_pct = DecimalParameter(0.1, 2.0, default=0.5, decimals=2, space="sell")
 
     # Kâr hedefi
-    take_profit_pct = DecimalParameter(2.0, 20.0, default=8.0, decimals=1, space="sell")
+    # Kâr hedefi — FİYAT hareketi olarak (8x kaldıraçla hesapta 8 katı eder).
+    #
+    # %8 -> hesapta ~%64.  Bu ayarla olculen: kazanma orani %23.3,
+    #       ortalama kazanc +%66.51, ortalama kayip -%17.99  -> +1.70/islem
+    # %4 -> hesapta ~%32.  Ortalama kazanc yariya inecegi icin basabas
+    #       kazanma orani %21.3'ten %35.1'e cikar. Hedef yakinlastigi icin
+    #       kazanma oraninin da yukselmesi beklenir; yeterince yukselip
+    #       yukselmedigini backtest soyleyecek.
+    take_profit_pct = DecimalParameter(2.0, 20.0, default=4.0, decimals=1, space="sell")
 
     # Kâr hedefi FİYAT hareketi mi, yoksa kaldıraçlı hesap kârı mı?
     #   False -> %8 FİYAT hareketi  (8x kaldıraçla hesapta ~%64)
