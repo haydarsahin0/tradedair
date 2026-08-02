@@ -18,20 +18,65 @@ warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
 set -a; . ./.env; set +a
 
 TOKEN="${TELEGRAM_TOKEN:-}"
-[ -n "$TOKEN" ] || { bad ".env icinde TELEGRAM_TOKEN bos."; exit 1; }
 
 api() { curl -sS --max-time 15 "https://api.telegram.org/bot${TOKEN}/$1"; }
 
+# .env'e bir anahtari yaz (varsa degistir, yoksa ekle)
+set_env() {
+    local key="$1" val="$2"
+    if grep -q "^${key}=" .env; then
+        python3 - "$key" "$val" <<'PY'
+import sys, pathlib
+key, val = sys.argv[1], sys.argv[2]
+p = pathlib.Path(".env")
+out = []
+for line in p.read_text().splitlines():
+    out.append(f"{key}={val}" if line.startswith(f"{key}=") else line)
+p.write_text("\n".join(out) + "\n")
+PY
+    else
+        printf '%s=%s\n' "$key" "$val" >> .env
+    fi
+}
+
 echo
 bold "1/4  Token gecerli mi?"
-ME="$(api getMe)"
-if ! printf '%s' "$ME" | grep -q '"ok":true'; then
-    bad "Token gecersiz. Telegram'da @BotFather -> /mybots -> API Token ile kontrol et."
-    echo "  Donen cevap: $ME"
-    exit 1
+
+if [ -z "$TOKEN" ]; then
+    warn ".env icinde TELEGRAM_TOKEN bos."
+else
+    echo "  .env'deki token: ${TOKEN:0:12}...${TOKEN: -4}"
 fi
+
+# Token bos ya da gecersizse sor — dogrulanana kadar tekrar sor.
+while :; do
+    if [ -n "$TOKEN" ]; then
+        ME="$(api getMe)"
+        if printf '%s' "$ME" | grep -q '"ok":true'; then
+            break
+        fi
+        bad "Bu token calismiyor."
+        printf '  Telegram cevabi: %s\n' "$(printf '%s' "$ME" | head -c 200)"
+    fi
+    echo
+    echo "  Telegram'da @BotFather -> /mybots -> botunu sec -> API Token"
+    echo "  (Token su bicimde: 1234567890:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)"
+    echo
+    read -r -p "  Token'i yapistir: " TOKEN
+    TOKEN="$(printf '%s' "$TOKEN" | tr -d '[:space:]')"
+    if [ -z "$TOKEN" ]; then
+        bad "Bos birakilamaz."
+        continue
+    fi
+done
+
 BOT_NAME="$(printf '%s' "$ME" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["username"])')"
 ok "Token gecerli — bot: @${BOT_NAME}"
+
+if [ "$TOKEN" != "${TELEGRAM_TOKEN:-}" ]; then
+    set_env TELEGRAM_TOKEN "$TOKEN"
+    ok ".env icindeki token guncellendi"
+fi
 
 # Bot calisiyorsa gelen mesajlari o yutar, getUpdates bos doner.
 echo
@@ -99,7 +144,7 @@ else
     warn ".env icindeki ID yanlis:"
     echo "      mevcut: ${CUR_ID:-<bos>}"
     echo "      dogru : ${NEW_ID}"
-    sed -i "s|^TELEGRAM_CHAT_ID=.*|TELEGRAM_CHAT_ID=${NEW_ID}|" .env
+    set_env TELEGRAM_CHAT_ID "$NEW_ID"
     ok ".env guncellendi"
 fi
 
