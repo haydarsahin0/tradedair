@@ -126,6 +126,20 @@ class CandleExpansion(IStrategy):
 
     leverage_num = IntParameter(1, 20, default=8, space="buy", optimize=False)
 
+    # --- Yon acma/kapama ---
+    # Ilk gercek backtest'te karin %92.7'si SHORT tarafindan geldi ve o donemde
+    # piyasa %40.73 dustu. Long tarafi 360 islemde islem basina sadece
+    # +0.29 USDT uretti (short: +3.87). Bu, edge'in gercek mi yoksa ayi
+    # piyasasina denk gelmis olmaktan mi ibaret oldugunu test etmek icin.
+    allow_long = BooleanParameter(default=True, space="buy", optimize=True)
+    allow_short = BooleanParameter(default=True, space="buy", optimize=True)
+
+    # --- Trend filtresi (varsayilan KAPALI) ---
+    # Acikken: fiyat EMA ustundeyse sadece long, altindaysa sadece short.
+    # Yonu piyasa rejimine baglar; sabit yon tercihinden daha durustur.
+    use_trend_filter = BooleanParameter(default=False, space="buy", optimize=True)
+    trend_ema = IntParameter(50, 400, default=200, space="buy", optimize=True)
+
     # ---------------------------------------------------------------- #
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -165,6 +179,11 @@ class CandleExpansion(IStrategy):
         df["stop_short"] = prev_open * (1.0 + sb)
         df["stop_long"] = prev_open * (1.0 - sb)
 
+        # Trend filtresi icin EMA (yalnizca use_trend_filter acikken kullanilir)
+        df["trend_ema_val"] = df["close"].ewm(
+            span=int(self.trend_ema.value), adjust=False
+        ).mean()
+
         df["period"] = period
         return df
 
@@ -179,8 +198,13 @@ class CandleExpansion(IStrategy):
         body_ok = df["prev_move"].abs() >= min_body
         valid = df["prev_open"].notna() & df["trigger"].notna() & (df["volume"] > 0)
 
+        use_trend = bool(self.use_trend_filter.value)
+        trend_short_ok = (df["close"] < df["trend_ema_val"]) if use_trend else True
+        trend_long_ok = (df["close"] > df["trend_ema_val"]) if use_trend else True
+
         # --- SHORT: önceki mum düşüş, fiyat tetiğe indi --- #
-        short_setup = valid & body_ok & (df["prev_move"] < 0)
+        short_setup = (valid & body_ok & (df["prev_move"] < 0)
+                       & bool(self.allow_short.value) & trend_short_ok)
         short_hit = short_setup & (df["low"] <= df["trigger"])
         # Stop girişin ÜSTÜNDE olmalı (yukarı boşlukta bozulabilir)
         short_hit &= df["stop_short"] > df["trigger"]
@@ -188,7 +212,8 @@ class CandleExpansion(IStrategy):
         short_hit &= (df["stop_short"] - df["trigger"]) / df["trigger"] <= max_stop
 
         # --- LONG: önceki mum yükseliş, fiyat tetiğe çıktı --- #
-        long_setup = valid & body_ok & (df["prev_move"] > 0)
+        long_setup = (valid & body_ok & (df["prev_move"] > 0)
+                      & bool(self.allow_long.value) & trend_long_ok)
         long_hit = long_setup & (df["high"] >= df["trigger"])
         long_hit &= df["stop_long"] < df["trigger"]
         long_hit &= (df["trigger"] - df["stop_long"]) / df["trigger"] <= max_stop
