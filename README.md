@@ -77,40 +77,29 @@ Bu ikisini not al.
 ### 2. Sunucuda kurulum
 
 ```bash
-git clone https://github.com/haydarsahin0/tradedair.git
+git clone -b claude/vibe-trading-bot-strategy-ex4d14 \
+  https://github.com/haydarsahin0/tradedair.git
 cd tradedair
-cp .env.example .env
-nano .env          # TELEGRAM_TOKEN ve TELEGRAM_CHAT_ID'yi yapıştır
-mkdir -p user_data/logs
+./scripts/setup.sh
 ```
 
-`.env` içindeki iki gizli anahtarı üret:
+Script Docker'ı kurar, gizli anahtarları üretir, `.env` dosyasını hazırlar ve
+istersen backtest'i çalıştırır. Sana sadece Telegram token'ını ve chat ID'ni sorar.
 
-```bash
-openssl rand -hex 32    # FREQUI_JWT_SECRET
-openssl rand -hex 32    # FREQUI_WS_TOKEN
-```
-
-### 3. Geçmiş veriyi indir ve backtest et
-
-```bash
-docker compose run --rm freqtrade download-data \
-  --config /freqtrade/user_data/config_backtest.json \
-  --timeframes 1h --timerange 20250101-20260801 --trading-mode futures
-
-docker compose run --rm freqtrade backtesting \
-  --config /freqtrade/user_data/config_backtest.json \
-  --strategy SupportResistanceBreakRetest \
-  --timerange 20250101-20260801
-```
-
-### 4. Botu başlat (test modunda)
+### 3. Botu başlat (test modunda)
 
 ```bash
 docker compose up -d
 ```
 
 Telegram'a "bot başladı" mesajı gelecek. Artık bilgisayara gerek yok.
+
+Backtest'i sonra tekrar çalıştırmak istersen:
+
+```bash
+./scripts/backtest.sh                    # varsayılan aralık
+./scripts/backtest.sh 20240101-20260801  # kendi aralığın
+```
 
 ---
 
