@@ -40,6 +40,9 @@ if ! docker compose run --rm freqtrade backtesting \
     die "Backtest basarisiz. Yukaridaki hata mesajina bak."
 fi
 
+# Sonucu Telegram'a gonder (token yoksa sessizce atlar)
+python3 scripts/notify_backtest.py || true
+
 echo
 echo "Sonuclar user_data/backtest_results/ altinda kayitli."
 echo "Detayli islem listesi icin:"

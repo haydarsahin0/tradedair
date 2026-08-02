@@ -177,7 +177,7 @@ class SupportResistanceBreakRetest(IStrategy):
     # Yol açıklığı ve risk
     min_room_pct = DecimalParameter(1.0, 6.0, default=2.5, decimals=1, space="buy")
     max_room_pct = DecimalParameter(8.0, 25.0, default=15.0, decimals=1, space="buy")
-    min_rr = DecimalParameter(1.0, 4.0, default=2.0, decimals=1, space="buy")
+    min_rr = DecimalParameter(1.5, 5.0, default=2.5, decimals=1, space="buy")
     # Stop tamponu: kirilan seviyenin ne kadar otesine konacagi.
     # Ikisinin BUYUGU kullanilir — ATR oynakligi yakalar, yuzde taban gorevi gorur.
     #
@@ -193,6 +193,18 @@ class SupportResistanceBreakRetest(IStrategy):
     # Kendi kuralın "bir sonraki desteğe çok varsa" dediği için varsayılan
     # False; ama True daha muhafazakâr ve hedefi gerçek yapıya bağlar.
     require_next_level = BooleanParameter(default=False, space="buy", optimize=True)
+
+    # --- Trend filtresi ---
+    # Kırılım-retest, ana trendin YÖNÜNDE çok daha iyi çalışır. Trende karşı
+    # alınan kırılımlar genelde tuzak olur (fiyat seviyeyi kırar, retest yapar,
+    # sonra ana trend yönünde geri döner ve stop'u alır).
+    #
+    # İlk backtest'te üst üste 13 kayıp görülmesi tam da bunun izi: strateji
+    # yönsüz çalıştığı için trende karşı seri halinde işlem açıyor.
+    #
+    # Filtre açıkken: fiyat EMA'nın üstündeyse SADECE long, altındaysa SADECE short.
+    use_trend_filter = BooleanParameter(default=True, space="buy", optimize=True)
+    trend_ema = IntParameter(100, 400, default=200, space="buy", optimize=True)
 
     # Kaldıraç
     leverage_num = IntParameter(1, 10, default=3, space="buy", optimize=False)
@@ -214,7 +226,7 @@ class SupportResistanceBreakRetest(IStrategy):
     # --- Kısmi kâr alma ---
     # Hedefe giden yolun bir kısmı katedilince pozisyonun bir bölümünü kapat,
     # kalanı takip eden stop ile koştur.
-    partial_tp_enable = BooleanParameter(default=True, space="sell", optimize=True)
+    partial_tp_enable = BooleanParameter(default=False, space="sell", optimize=True)
     partial_tp_at = DecimalParameter(0.3, 0.8, default=0.5, decimals=2, space="sell")
     partial_tp_share = DecimalParameter(0.2, 0.7, default=0.5, decimals=2, space="sell")
 
@@ -225,6 +237,7 @@ class SupportResistanceBreakRetest(IStrategy):
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe["atr"] = ta.ATR(dataframe, timeperiod=14)
+        dataframe["trend_ema"] = ta.EMA(dataframe, timeperiod=int(self.trend_ema.value))
         dataframe["vol_ma"] = dataframe["volume"].rolling(20).mean()
 
         signals = self._compute_sr_signals(dataframe)
@@ -251,6 +264,7 @@ class SupportResistanceBreakRetest(IStrategy):
         volume = df["volume"].to_numpy(dtype=float)
         vol_ma = df["vol_ma"].to_numpy(dtype=float)
         atr = df["atr"].to_numpy(dtype=float)
+        tema = df["trend_ema"].to_numpy(dtype=float)
 
         left = int(self.pivot_left.value)
         right = int(self.pivot_right.value)
@@ -267,6 +281,7 @@ class SupportResistanceBreakRetest(IStrategy):
         stop_buf = float(self.stop_buffer_pct.value) / 100.0
         stop_atr = float(self.stop_buffer_atr.value)
         need_level = bool(self.require_next_level.value)
+        use_trend = bool(self.use_trend_filter.value)
 
         conf_ph, conf_pl = find_confirmed_pivots(high, low, left, right)
 
@@ -342,7 +357,9 @@ class SupportResistanceBreakRetest(IStrategy):
                 rejected = c < brk_level
                 bearish = c < open_[t]
 
-                if touched and rejected and bearish:
+                trend_ok = (not use_trend) or (
+                    not np.isnan(tema[t]) and c < tema[t])
+                if touched and rejected and bearish and trend_ok:
                     below = lv[lv < c * 0.999]
                     real_level = below.size > 0
                     if real_level:
@@ -379,7 +396,9 @@ class SupportResistanceBreakRetest(IStrategy):
                 supported = c > brk_level
                 bullish = c > open_[t]
 
-                if touched and supported and bullish:
+                trend_ok = (not use_trend) or (
+                    not np.isnan(tema[t]) and c > tema[t])
+                if touched and supported and bullish and trend_ok:
                     above = lv[lv > c * 1.001]
                     real_level = above.size > 0
                     if real_level:
