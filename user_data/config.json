@@ -43,7 +43,8 @@
         "pair_whitelist": [],
         "pair_blacklist": [
             "(USDC|USDE|USDD|USDP|USDS|USD1|FDUSD|TUSD|BUSD|DAI|PYUSD|RLUSD|LUSD|FRAX|GUSD|SUSD|USTC|EURT|EURS|EURI|XAUT|PAXG)/.*",
-            ".*(3L|3S|5L|5S|UP|DOWN)/.*"
+            ".*(3L|3S|5L|5S|UP|DOWN)/.*",
+            "(XRP|ZEC)/USDT:USDT"
         ]
     },
     "pairlists": [

@@ -63,6 +63,62 @@ if [ -z "$PAIRS" ]; then
     die "Cift listesi alinamadi. Yukaridaki hataya bak."
 fi
 
+# --- Kaldirac kademesi olmayan ciftleri ele --- #
+# Bybit bazi ciftler icin kaldirac kademesi (leverage tier) verisi
+# dondurmuyor. Freqtrade bu veri olmadan likidasyon fiyatini
+# hesaplayamadigi icin backtest'i komple durduruyor:
+#   "Pairs X got no leverage tiers available"
+# Bunlari onceden tespit edip listeden cikariyoruz.
+echo
+echo "  Kaldirac kademesi kontrol ediliyor..."
+
+FILTERED="$(docker compose run --rm --entrypoint python \
+    -e PAIRS_JSON="$PAIRS" freqtrade -c '
+import json, os, sys
+
+pairs = json.loads(os.environ["PAIRS_JSON"])
+tiers = {}
+
+# 1) Freqtrade onbellegi varsa oradan oku (hizli)
+cache = "/freqtrade/user_data/data/bybit/leverage_tiers.json"
+try:
+    with open(cache) as f:
+        tiers = json.load(f)
+except Exception:
+    pass
+
+# 2) Onbellek yoksa/eksikse borsadan cek
+if not all(p in tiers for p in pairs):
+    try:
+        import ccxt
+        ex = ccxt.bybit({"options": {"defaultType": "swap"}})
+        ex.load_markets()
+        tiers = ex.fetch_leverage_tiers(pairs)
+    except Exception as e:
+        print("WARN|%s" % str(e)[:120], file=sys.stderr)
+
+good = [p for p in pairs if tiers.get(p)]
+bad = [p for p in pairs if not tiers.get(p)]
+print(json.dumps({"good": good, "bad": bad}))
+' 2>/dev/null | grep -oE '^\{.*\}$' | tail -1)"
+
+if [ -n "$FILTERED" ]; then
+    BADLIST="$(python3 -c "
+import json, sys
+d = json.loads(sys.argv[1])
+print(', '.join(p.replace('/USDT:USDT','') for p in d['bad']))" "$FILTERED")"
+    PAIRS="$(python3 -c "
+import json, sys
+print(json.dumps(json.loads(sys.argv[1])['good']))" "$FILTERED")"
+    if [ -n "$BADLIST" ]; then
+        warn "Elendi (Bybit kaldirac kademesi vermiyor): $BADLIST"
+    else
+        ok "Tum ciftlerde kaldirac kademesi mevcut"
+    fi
+else
+    warn "Kaldirac kademesi kontrolu yapilamadi — liste oldugu gibi kullaniliyor"
+fi
+
 python3 - "$BT" "$PAIRS" <<'PY'
 import json, sys
 bt, pairs = sys.argv[1], json.loads(sys.argv[2])
