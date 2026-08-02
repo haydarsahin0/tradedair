@@ -52,6 +52,29 @@
         }
     ],
 
+    "_comment_env": [
+        "docker-compose, .env icindeki FREQTRADE__TELEGRAM__* ve",
+        "FREQTRADE__API_SERVER__* degiskenlerini her calistirmaya enjekte eder.",
+        "Bu bloklar dosyada eksikse, enjeksiyon 'enabled' gibi zorunlu alanlari",
+        "olmayan yarim bir blok yaratir ve sema dogrulamasi patlar.",
+        "Bu yuzden ikisi de burada tam ve KAPALI olarak tanimli."
+    ],
+
+    "telegram": {
+        "enabled": false,
+        "token": "backtest-de-kullanilmaz",
+        "chat_id": "0"
+    },
+
+    "api_server": {
+        "enabled": false,
+        "listen_ip_address": "127.0.0.1",
+        "listen_port": 8080,
+        "username": "backtest",
+        "password": "backtest-de-kullanilmaz",
+        "jwt_secret_key": "backtest-de-kullanilmayan-dolgu-anahtari-0123456789"
+    },
+
     "internals": {
         "process_throttle_secs": 5
     }
