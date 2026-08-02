@@ -112,9 +112,28 @@ fi
 
 # ---------------------------------------------------------------- #
 echo
-bold "3/5  Dizinler"
+bold "3/5  Dizinler ve takas alani"
 mkdir -p user_data/logs user_data/data
 ok "user_data/logs ve user_data/data hazir"
+
+# Kucuk sunucularda (1 GB RAM) backtest bellek sikistirir.
+# Takas alani yoksa ve RAM 2 GB'in altindaysa 2 GB swap ekle.
+RAM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 9999)
+SWAP_MB=$(awk '/SwapTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+
+if [ "$RAM_MB" -lt 2048 ] && [ "$SWAP_MB" -lt 512 ]; then
+    warn "RAM ${RAM_MB} MB ve takas alani yok — 2 GB swap olusturuluyor..."
+    if [ ! -f /swapfile ]; then
+        fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048
+        chmod 600 /swapfile
+        mkswap /swapfile >/dev/null
+    fi
+    swapon /swapfile 2>/dev/null || true
+    grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    ok "2 GB takas alani aktif (yeniden baslatmada da kalici)"
+else
+    ok "Bellek yeterli (RAM ${RAM_MB} MB, swap ${SWAP_MB} MB)"
+fi
 
 # ---------------------------------------------------------------- #
 echo
