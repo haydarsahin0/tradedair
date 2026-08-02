@@ -112,7 +112,16 @@ fi
 
 # ---------------------------------------------------------------- #
 echo
-bold "3/5  Dizinler ve takas alani"
+bold "3/5  Dizinler, takas alani, screen"
+
+if ! command -v screen >/dev/null 2>&1; then
+    warn "screen kurulu degil, kuruluyor (uzun islerin baglanti kopunca olmemesi icin)..."
+    (apt-get update -qq && apt-get install -y -qq screen) >/dev/null 2>&1 \
+        && ok "screen kuruldu" || warn "screen kurulamadi (kritik degil)"
+else
+    ok "screen kurulu"
+fi
+
 mkdir -p user_data/logs user_data/data
 ok "user_data/logs ve user_data/data hazir"
 
