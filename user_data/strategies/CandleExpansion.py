@@ -242,7 +242,57 @@ class CandleExpansion(IStrategy):
         df.loc[first_long, ["enter_long", "enter_tag"]] = (1, "genisleme_long")
         df.loc[first_short, ["enter_short", "enter_tag"]] = (1, "genisleme_short")
 
+        self._notify_signal(df, metadata)
         return df
+
+    # ---------------------------------------------------------------- #
+
+    def _notify_signal(self, df: DataFrame, metadata: dict) -> None:
+        """
+        Sinyal olustugu anda Telegram'a bildirim gonderir.
+
+        Freqtrade varsayilan olarak yalnizca ISLEM acilinca/kapaninca haber
+        verir. Bu, sinyalin kendisini de duyurur — slot dolu oldugu icin
+        isleme donusmeyen sinyalleri de gorursun.
+
+        Yalnizca canli/dry-run modda ve yalnizca SON mum icin calisir;
+        backtest'te hic devreye girmez.
+        """
+        dp = getattr(self, "dp", None)
+        if dp is None or getattr(dp, "runmode", None) is None:
+            return
+        if dp.runmode.value not in ("live", "dry_run"):
+            return
+        if df.empty:
+            return
+
+        last = df.iloc[-1]
+        is_long = bool(last.get("enter_long") == 1)
+        is_short = bool(last.get("enter_short") == 1)
+        if not (is_long or is_short):
+            return
+
+        pair = metadata.get("pair", "?")
+        trigger = float(last["trigger"])
+        stop = float(last["stop_long"] if is_long else last["stop_short"])
+        prev_move = float(last["prev_move"]) * 100
+        tp = float(self.take_profit_pct.value)
+        lev = float(self.leverage_num.value)
+
+        target = trigger * (1 + tp / 100) if is_long else trigger * (1 - tp / 100)
+        risk = abs(stop - trigger) / trigger * 100
+
+        yon = "LONG \U0001F7E2" if is_long else "SHORT \U0001F534"
+        msg = (
+            f"\U0001F514 <b>SINYAL — {yon}</b>\n"
+            f"<b>{pair}</b>\n\n"
+            f"Onceki 4s mum : %{prev_move:+.2f}\n"
+            f"Giris (tetik) : {trigger:.6g}\n"
+            f"Stop          : {stop:.6g}  (%{risk:.2f} uzakta = hesapta %{risk*lev:.1f})\n"
+            f"Hedef         : {target:.6g}  (%{tp:.1f} = hesapta %{tp*lev:.0f})\n"
+            f"Risk/Odul     : {tp/risk:.2f}"
+        )
+        dp.send_msg(msg)
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         # Çıkışlar custom_exit ve custom_stoploss ile yönetiliyor

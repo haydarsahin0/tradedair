@@ -56,25 +56,31 @@
     "telegram": {
         "enabled": true,
         "_comment": "token ve chat_id .env dosyasindan gelir (FREQTRADE__TELEGRAM__*)",
+        "allow_custom_messages": true,
         "notification_settings": {
             "status": "on",
             "warning": "on",
             "startup": "on",
             "entry": "on",
             "entry_fill": "on",
+            "entry_cancel": "on",
             "exit": {
                 "roi": "on",
                 "stop_loss": "on",
                 "stoploss_on_exchange": "on",
                 "custom_exit": "on",
                 "force_exit": "on",
-                "exit_signal": "on"
+                "exit_signal": "on",
+                "trailing_stop_loss": "on",
+                "liquidation": "on",
+                "emergency_exit": "on"
             },
             "exit_fill": "on",
-            "entry_cancel": "on",
             "exit_cancel": "on",
             "protection_trigger": "on",
-            "protection_trigger_global": "on"
+            "protection_trigger_global": "on",
+            "strategy_msg": "on",
+            "show_candle": "off"
         },
         "reload": true,
         "balance_dust_level": 0.01
