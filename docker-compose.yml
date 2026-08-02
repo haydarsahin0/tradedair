@@ -1,0 +1,28 @@
+services:
+  freqtrade:
+    image: freqtradeorg/freqtrade:stable
+    container_name: tradedair
+    restart: unless-stopped
+    volumes:
+      - "./user_data:/freqtrade/user_data"
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      # Gizli bilgiler config.json'a yazılmaz, .env dosyasından gelir.
+      - FREQTRADE__TELEGRAM__TOKEN=${TELEGRAM_TOKEN}
+      - FREQTRADE__TELEGRAM__CHAT_ID=${TELEGRAM_CHAT_ID}
+      - FREQTRADE__API_SERVER__USERNAME=${FREQUI_USERNAME}
+      - FREQTRADE__API_SERVER__PASSWORD=${FREQUI_PASSWORD}
+      - FREQTRADE__API_SERVER__JWT_SECRET_KEY=${FREQUI_JWT_SECRET}
+      - FREQTRADE__API_SERVER__WS_TOKEN=${FREQUI_WS_TOKEN}
+      # Canlıya geçince doldurulur; test modunda boş kalabilir.
+      - FREQTRADE__EXCHANGE__KEY=${BYBIT_API_KEY}
+      - FREQTRADE__EXCHANGE__SECRET=${BYBIT_API_SECRET}
+    command: >
+      trade
+      --config /freqtrade/user_data/config.json
+      --strategy SupportResistanceBreakRetest
+      --logfile /freqtrade/user_data/logs/freqtrade.log
+      --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
