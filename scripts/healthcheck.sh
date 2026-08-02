@@ -17,6 +17,22 @@ warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
 
 PROBLEMS=0
 
+# --- EN BASTA: gercek para mi, sahte para mi? --- #
+MODE="$(docker compose logs --tail 800 2>/dev/null \
+        | grep -oE "Dry run is (enabled|disabled)" | tail -1)"
+case "$MODE" in
+    *disabled*)
+        printf '\n\033[1m\033[31m  >>> CANLI MOD — GERCEK PARAYLA ISLEM ACIYOR <<<\033[0m\n' ;;
+    *enabled*)
+        printf '\n\033[1m\033[36m  >>> TEST MODU (dry-run) — sahte parayla calisiyor <<<\033[0m\n' ;;
+    *)
+        ENVMODE="$(grep "^DRY_RUN=" .env 2>/dev/null | cut -d= -f2)"
+        case "$ENVMODE" in
+            false) printf '\n\033[1m\033[31m  >>> .env: CANLI MOD (loglarda henuz gorunmedi) <<<\033[0m\n' ;;
+            *)     printf '\n\033[1m\033[36m  >>> .env: TEST MODU <<<\033[0m\n' ;;
+        esac ;;
+esac
+
 bold "1. Docker sunucu acilisinda kendiliginden basliyor mu?"
 if systemctl is-enabled docker >/dev/null 2>&1; then
     ok "Docker acilista otomatik basliyor"
