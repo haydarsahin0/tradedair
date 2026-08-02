@@ -96,9 +96,12 @@
         "listen_ip_address": "0.0.0.0",
         "listen_port": 8080,
         "verbosity": "error",
-        "enable_openapi": false,
-        "CORS_origins": [],
-        "_comment": "username, password, jwt_secret_key, ws_token .env dosyasindan gelir"
+        "enable_openapi": true,
+        "_comment": "username, password, jwt_secret_key, ws_token .env dosyasindan gelir",
+        "_comment_cors": "Lovable arayuzunu kullanacaksan uygulamanin adresini asagiya ekle",
+        "CORS_origins": [
+            "http://localhost:8080"
+        ]
     },
 
     "initial_state": "running",

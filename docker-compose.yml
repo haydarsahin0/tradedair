@@ -26,3 +26,27 @@ services:
       --strategy SupportResistanceBreakRetest
       --logfile /freqtrade/user_data/logs/freqtrade.log
       --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
+
+  # HTTPS reverse proxy — SADECE Lovable arayüzü kullanacaksan gerekli.
+  # Başlatmak için:  docker compose --profile lovable up -d
+  caddy:
+    image: caddy:2-alpine
+    container_name: tradedair-caddy
+    restart: unless-stopped
+    profiles: ["lovable"]
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - .env
+    volumes:
+      - "./Caddyfile:/etc/caddy/Caddyfile:ro"
+      - "caddy_data:/data"
+      - "caddy_config:/config"
+      - "./user_data/logs:/var/log/caddy"
+    depends_on:
+      - freqtrade
+
+volumes:
+  caddy_data:
+  caddy_config:

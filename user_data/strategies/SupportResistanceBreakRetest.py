@@ -185,6 +185,27 @@ class SupportResistanceBreakRetest(IStrategy):
     # Hedefe yaklaşınca çık (hedefin tam üstünde likidite biter)
     target_approach_pct = DecimalParameter(0.0, 1.0, default=0.2, decimals=2, space="sell")
 
+    # --- Takip eden stop (kâr arttıkça stop'u arkadan taşı) ---
+    # Eşikler "R" cinsinden: 1R = girişten yapısal stop'a olan mesafe.
+    # Böylece her işlemde ve her coin'de kendi riskine göre ölçeklenir.
+    #
+    #   move >= be_trigger_r    -> stop başabaşa çekilir (artık zarar edemez)
+    #   move >= trail_trigger_r -> stop en iyi fiyatın trail_dist_r kadar arkasına
+    breakeven_trigger_r = DecimalParameter(0.5, 2.0, default=1.0, decimals=1, space="sell")
+    breakeven_offset_pct = DecimalParameter(0.0, 0.5, default=0.1, decimals=2, space="sell")
+    trail_trigger_r = DecimalParameter(1.0, 3.0, default=1.5, decimals=1, space="sell")
+    trail_dist_r = DecimalParameter(0.3, 1.5, default=0.8, decimals=1, space="sell")
+
+    # --- Kısmi kâr alma ---
+    # Hedefe giden yolun bir kısmı katedilince pozisyonun bir bölümünü kapat,
+    # kalanı takip eden stop ile koştur.
+    partial_tp_enable = BooleanParameter(default=True, space="sell", optimize=True)
+    partial_tp_at = DecimalParameter(0.3, 0.8, default=0.5, decimals=2, space="sell")
+    partial_tp_share = DecimalParameter(0.2, 0.7, default=0.5, decimals=2, space="sell")
+
+    # Kısmi çıkış için gerekli
+    position_adjustment_enable = True
+
     # ---------------------------------------------------------------- #
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -464,19 +485,129 @@ class SupportResistanceBreakRetest(IStrategy):
         **kwargs,
     ) -> float | None:
         """
-        Stop, kırılan seviyenin arkasına konur: fiyat o seviyeyi geri alırsa
-        kırılım başarısız demektir ve işlemde kalmanın anlamı kalmaz.
+        Üç kademeli stop:
+
+          1. Başlangıç — kırılan seviyenin arkasında (yapısal stop).
+             Fiyat o seviyeyi geri alırsa kırılım başarısız demektir.
+          2. Başabaş  — lehimize 1R hareket olunca stop girişe çekilir.
+             Bu noktadan sonra işlem zarar edemez.
+          3. Takip    — 1.5R'den sonra stop, görülen en iyi fiyatın
+             0.8R arkasından sürüklenir; kâr arttıkça stop da yükselir.
+
+        Stop asla geriye gitmez — freqtrade zaten gevşemeyi kabul etmez,
+        ayrıca aşağıdaki min/max mantığı da sadece sıkılaştırır.
         """
-        stop, _ = self._entry_levels(pair, trade)
-        if stop is None:
+        struct_stop, _ = self._entry_levels(pair, trade)
+        if struct_stop is None:
             return None
 
+        entry = trade.open_rate
+        if not entry or entry <= 0:
+            return None
+
+        # 1R = girişten yapısal stop'a olan mesafe (oran olarak)
+        risk = abs(entry - struct_stop) / entry
+        if risk <= 0:
+            return None
+
+        is_short = trade.is_short
+
+        # İşlem boyunca görülen en iyi fiyat
+        if is_short:
+            best = trade.min_rate if trade.min_rate else current_rate
+            move = (entry - best) / entry
+        else:
+            best = trade.max_rate if trade.max_rate else current_rate
+            move = (best - entry) / entry
+
+        move_r = move / risk
+        new_stop = struct_stop
+
+        be_offset = float(self.breakeven_offset_pct.value) / 100.0
+
+        # Kademe 2 — başabaş
+        if move_r >= float(self.breakeven_trigger_r.value):
+            if is_short:
+                new_stop = min(new_stop, entry * (1 - be_offset))
+            else:
+                new_stop = max(new_stop, entry * (1 + be_offset))
+
+        # Kademe 3 — takip eden stop
+        if move_r >= float(self.trail_trigger_r.value):
+            trail_gap = float(self.trail_dist_r.value) * risk
+            if is_short:
+                new_stop = min(new_stop, best * (1 + trail_gap))
+            else:
+                new_stop = max(new_stop, best * (1 - trail_gap))
+
         return stoploss_from_absolute(
-            stop,
+            new_stop,
             current_rate,
-            is_short=trade.is_short,
+            is_short=is_short,
             leverage=trade.leverage,
         )
+
+    def adjust_trade_position(
+        self,
+        trade: Trade,
+        current_time: datetime,
+        current_rate: float,
+        current_profit: float,
+        min_stake: float | None,
+        max_stake: float,
+        current_entry_rate: float,
+        current_exit_rate: float,
+        current_entry_profit: float,
+        current_exit_profit: float,
+        **kwargs,
+    ) -> float | None:
+        """
+        Hedefe giden yolun `partial_tp_at` kadarı katedilince pozisyonun
+        `partial_tp_share` kadarını kapatır — kâr cebe girer, kalan pozisyon
+        takip eden stop ile hedefe kadar koşmaya devam eder.
+
+        Bir işlemde yalnızca bir kez çalışır.
+        """
+        if not self.partial_tp_enable.value:
+            return None
+        if trade.get_custom_data("partial_done"):
+            return None
+
+        _, target = self._entry_levels(trade.pair, trade)
+        if target is None:
+            return None
+
+        entry = trade.open_rate
+        if not entry or entry <= 0:
+            return None
+
+        total = abs(target - entry)
+        if total <= 0:
+            return None
+
+        # Hedefe ne kadar yaklaştık?
+        if trade.is_short:
+            progress = (entry - current_rate) / total
+        else:
+            progress = (current_rate - entry) / total
+
+        if progress < float(self.partial_tp_at.value):
+            return None
+
+        share = float(self.partial_tp_share.value)
+        amount = trade.stake_amount * share
+
+        if min_stake is not None:
+            # Kalan pozisyon min_stake'in altına düşecekse kısmi çıkış yapma
+            if amount < min_stake or (trade.stake_amount - amount) < min_stake:
+                return None
+
+        trade.set_custom_data("partial_done", True)
+        logger.info(
+            "%s: kismi kar alma — yolun %.0f%%'i katedildi, pozisyonun %.0f%%'i kapatiliyor",
+            trade.pair, progress * 100, share * 100,
+        )
+        return -amount
 
     def custom_exit(
         self,

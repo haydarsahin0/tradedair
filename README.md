@@ -26,14 +26,34 @@ bir bölgeye ne kadar çok dokunulmuşsa seviye o kadar güçlüdür.
 Tam tersi: direnç yukarı kırılır → dirence retest → üstünde tutunur →
 bir sonraki dirence çok varsa → **LONG**.
 
-### Stop ve hedef
+### Çıkış — üç kademeli takip eden stop
 
-- **Stop**: kırılan seviyenin arkasında. Fiyat o seviyeyi geri alırsa kırılım
-  başarısız demektir, işlemde kalmanın anlamı yok.
-- **Hedef**: bir sonraki destek/direnç. Yol bittiğinde tez de biter.
-- **Risk/ödül filtresi**: hedef mesafesi / stop mesafesi oranı eşiğin altındaysa
-  sinyal alınmaz. Yani "mesafe çok olmalı" kuralı hem mutlak yüzde hem de R/R
-  olarak uygulanır.
+Stop sabit değil; işlem kâra geçtikçe arkadan sürüklenir, böylece kazanç geri
+verilmez. Eşikler **R** cinsinden — 1R = girişten yapısal stop'a olan mesafe,
+yani her işlemin kendi riski. Bu sayede her coin'de ve her volatilitede
+kendiliğinden ölçeklenir.
+
+| Kademe | Ne zaman | Stop nerede |
+|---|---|---|
+| **1. Yapısal** | giriş anında | kırılan seviyenin arkasında |
+| **2. Başabaş** | lehe 1R hareket | girişte — artık zarar edemez |
+| **3. Takip** | lehe 1.5R sonrası | görülen en iyi fiyatın 0.8R arkasında |
+
+Stop asla gevşemez, sadece sıkılaşır.
+
+**Kısmi kâr alma**: hedefe giden yolun yarısı katedilince pozisyonun %50'si
+kapatılır — kâr cebe girer. Kalan yarısı takip eden stop ile hedefe kadar
+koşmaya devam eder.
+
+**Hedef**: bir sonraki destek/direnç. Yol bittiğinde tez de biter.
+
+**Risk/ödül filtresi**: hedef mesafesi / stop mesafesi oranı eşiğin altındaysa
+sinyal alınmaz. Yani "mesafe çok olmalı" kuralı hem mutlak yüzde hem de R/R
+olarak uygulanır.
+
+Örnek (testten): giriş 100, yapısal stop 98 (1R = %2). Fiyat 108'e (4R) çıkıp
+geri döndüğünde stop 106.27'ye taşınmış oluyor ve orada çıkılıyor —
+fiyat bazında **+%6.27**, 3x kaldıraçla hesapta **+%18.8**.
 
 Ayarlanabilir tüm parametreler `user_data/strategies/SupportResistanceBreakRetest.py`
 içinde en üstte, isimleriyle birlikte duruyor.
@@ -124,6 +144,17 @@ Grafikler, işlem geçmişi ve seviyeler burada görünür.
 > Sunucuyu internete açıyorsan mutlaka güçlü bir şifre kullan, tercihen bir
 > reverse proxy arkasına HTTPS ile koy.
 
+### Lovable ile kendi arayüzün
+
+Freqtrade'in tam bir REST API'si var, yani Lovable'da kendi panelini yapıp
+bota bağlayabilirsin. Alan adı + HTTPS + CORS ayarı gerekiyor; hepsinin
+kurulumu ve Lovable'a yapıştıracağın hazır prompt **[docs/LOVABLE.md](docs/LOVABLE.md)**
+dosyasında.
+
+```bash
+docker compose --profile lovable up -d   # HTTPS proxy ile başlat
+```
+
 ---
 
 ## Test modundan canlıya geçiş
@@ -151,10 +182,11 @@ Strateji kodu ağ erişimi olmadan test edilebilir:
 
 ```bash
 python scripts/gen_test_data.py        # sentetik OHLCV üretir
-python scripts/validate_strategy.py    # 3 testi çalıştırır
+python scripts/validate_strategy.py    # giriş mantığı — 3 test
+python scripts/validate_exits.py       # çıkış mantığı — takip eden stop + kısmi TP
 ```
 
-Testler:
+### Giriş testleri (`validate_strategy.py`)
 
 1. **Sinyal üretimi** — kaç sinyal, ortalama yol açıklığı ve R/R.
 2. **Kural doğrulaması** — her sinyalin gerçekten kurallara uyduğu:
@@ -165,6 +197,18 @@ Testler:
    görüyordur ve backtest sonuçları yalandır.
 
 Son çalıştırmada üçü de temiz geçti (255 sinyal, 40 barda 0 uyuşmazlık).
+
+### Çıkış testleri (`validate_exits.py`)
+
+Sahte bir işlem hayat döngüsü simüle eder ve doğrular:
+
+- stop hiçbir zaman gevşemiyor, sadece sıkılaşıyor
+- 1R'de başabaşa çekiliyor
+- 1.5R sonrası kârı kilitleyerek takip ediyor
+- fiyat geri çekilince takip eden stop kârda kapatıyor
+- kısmi kâr alma tam yolun yarısında, yalnızca bir kez tetikleniyor
+
+Long ve short için ayrı ayrı. Son çalıştırmada ikisi de geçti.
 
 > Bu testler sentetik veriyle çalışır ve **mantığın doğruluğunu** kanıtlar,
 > kârlılığı değil. Kârlılık için gerçek Bybit verisiyle backtest gerekir (adım 3).
