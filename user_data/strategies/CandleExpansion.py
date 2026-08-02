@@ -139,6 +139,13 @@ class CandleExpansion(IStrategy):
 
     leverage_num = IntParameter(1, 20, default=8, space="buy", optimize=False)
 
+    # Borsa istenen kaldiraci veremiyorsa isleme GIRME.
+    # False yaparsan dusuk kaldiracla acar (pozisyon kucuk olur).
+    require_full_leverage = BooleanParameter(default=True, space="buy", optimize=False)
+
+    # leverage() ile confirm_trade_entry arasinda bilgi tasir
+    _lev_seen: dict = {}
+
     # --- Yon acma/kapama ---
     # Ilk gercek backtest'te karin %92.7'si SHORT tarafindan geldi ve o donemde
     # piyasa %40.73 dustu. Long tarafi 360 islemde islem basina sadece
@@ -282,15 +289,15 @@ class CandleExpansion(IStrategy):
         target = trigger * (1 + tp / 100) if is_long else trigger * (1 - tp / 100)
         risk = abs(stop - trigger) / trigger * 100
 
-        yon = "LONG \U0001F7E2" if is_long else "SHORT \U0001F534"
+        yon = "LONG" if is_long else "SHORT"
         msg = (
-            f"\U0001F514 <b>SINYAL — {yon}</b>\n"
-            f"<b>{pair}</b>\n\n"
+            f"SINYAL - {yon}\n"
+            f"{pair}\n\n"
             f"Onceki 4s mum : %{prev_move:+.2f}\n"
             f"Giris (tetik) : {trigger:.6g}\n"
-            f"Stop          : {stop:.6g}  (%{risk:.2f} uzakta = hesapta %{risk*lev:.1f})\n"
-            f"Hedef         : {target:.6g}  (%{tp:.1f} = hesapta %{tp*lev:.0f})\n"
-            f"Risk/Odul     : {tp/risk:.2f}"
+            f"Stop          : {stop:.6g}  (%{risk:.2f} uzakta)\n"
+            f"Hedef         : {target:.6g}  (%{tp:.1f})\n"
+            f"Risk/Odul     : {tp / risk:.2f}"
         )
         dp.send_msg(msg)
 
@@ -313,19 +320,43 @@ class CandleExpansion(IStrategy):
         **kwargs,
     ) -> bool:
         """
-        Emir gonderilmeden hemen once Telegram'a giris ozeti atar.
+        Emir gonderilmeden hemen once son kontrol ve Telegram bildirimi.
 
-        Freqtrade'in kendi giris bildirimi fiyat ve miktari gosterir ama
-        NEREDE cikacagini gostermez. Bu mesaj stop ve hedefi de veriyor.
-        Her zaman True doner — islemi engellemez, sadece haber verir.
+        1) KALDIRAC KONTROLU — borsa istenen kaldiraci veremiyorsa islemi
+           engeller. Bybit bazi ciftlerde kaldirac kademesi vermiyor; o
+           durumda pozisyon sessizce 1x acilir, yani hedeflenenin sekizde
+           biri buyuklugunde. Bu, test ettigimiz strateji degildir.
+        2) Giris ozetini Telegram'a atar (stop ve hedef dahil).
         """
-        try:
-            dp = getattr(self, "dp", None)
-            if dp is None or getattr(dp, "runmode", None) is None:
-                return True
-            if dp.runmode.value not in ("live", "dry_run"):
-                return True
+        want = float(self.leverage_num.value)
+        actual, max_lev = self._lev_seen.get(pair, (want, want))
 
+        dp = getattr(self, "dp", None)
+        live = (dp is not None and getattr(dp, "runmode", None) is not None
+                and dp.runmode.value in ("live", "dry_run"))
+
+        if actual < want - 1e-9 and self.require_full_leverage.value:
+            msg = (
+                f"KALDIRAC YETERSIZ - ISLEM IPTAL\n"
+                f"{pair}\n\n"
+                f"Istenen : {want:.0f}x\n"
+                f"Borsanin verdigi: {max_lev:.2f}x\n\n"
+                f"Bybit bu cift icin kaldirac kademesi vermiyor.\n"
+                f"Islem acilsaydi hedeflenenin {want / max(actual, 0.01):.0f} kati "
+                f"kucuk olurdu. Bu yuzden girilmedi."
+            )
+            logger.warning("%s: kaldirac %.2fx < %.0fx — giris iptal", pair, actual, want)
+            if live:
+                try:
+                    dp.send_msg(msg, always_send=True)
+                except Exception:
+                    pass
+            return False
+
+        if not live:
+            return True
+
+        try:
             df, _ = dp.get_analyzed_dataframe(pair, self.timeframe)
             if df is None or df.empty:
                 return True
@@ -334,26 +365,26 @@ class CandleExpansion(IStrategy):
             is_short = side == "short"
             stop = float(last["stop_short"] if is_short else last["stop_long"])
             tp = float(self.take_profit_pct.value)
-            lev = float(self.leverage_num.value)
 
             target = rate * (1 - tp / 100) if is_short else rate * (1 + tp / 100)
             risk = abs(stop - rate) / rate * 100
 
-            yon = "SHORT \U0001F534" if is_short else "LONG \U0001F7E2"
+            yon = "SHORT" if is_short else "LONG"
             msg = (
-                f"\U0001F4E5 <b>ISLEM ACILIYOR — {yon}</b>\n"
-                f"<b>{pair}</b>\n\n"
-                f"Giris   : {rate:.6g}\n"
-                f"Miktar  : {amount:.6g}\n"
-                f"Kaldirac: {lev:.0f}x\n\n"
-                f"\U0001F6D1 STOP  : {stop:.6g}\n"
-                f"     (%{risk:.2f} uzakta = hesapta -%{risk * lev:.1f})\n"
-                f"\U0001F3AF HEDEF : {target:.6g}\n"
-                f"     (%{tp:.1f} = hesapta +%{tp * lev:.0f})\n\n"
+                f"ISLEM ACILIYOR - {yon}\n"
+                f"{pair}\n\n"
+                f"Giris    : {rate:.6g}\n"
+                f"Miktar   : {amount:.6g}\n"
+                f"Kaldirac : {actual:.0f}x\n"
+                f"Nominal  : {amount * rate:.2f} USDT\n\n"
+                f"STOP  : {stop:.6g}\n"
+                f"        %{risk:.2f} uzakta = hesapta -%{risk * actual:.1f}\n"
+                f"HEDEF : {target:.6g}\n"
+                f"        %{tp:.1f} = hesapta +%{tp * actual:.0f}\n\n"
                 f"Risk/Odul: {tp / risk:.2f}"
             )
             dp.send_msg(msg, always_send=True)
-        except Exception as e:  # bildirim hatasi islemi engellemesin
+        except Exception as e:
             logger.warning("Giris bildirimi gonderilemedi: %s", e)
 
         return True
@@ -371,7 +402,24 @@ class CandleExpansion(IStrategy):
         side: str,
         **kwargs,
     ) -> float:
-        return float(min(self.leverage_num.value, max_leverage))
+        """
+        Istenen kaldirac, borsanin o cift icin izin verdiginin ustune cikamaz.
+
+        DIKKAT: Bybit bazi ciftler icin kaldirac kademesi (leverage tier)
+        verisi dondurmuyor. O durumda freqtrade max_leverage'i 1.0 kabul
+        eder ve pozisyon SESSIZCE 8x yerine 1x acilir — yani hedeflenenin
+        sekizde biri buyuklugunde. Bunu yakalayip kaydediyoruz;
+        confirm_trade_entry bu bilgiye bakip islemi engelliyor.
+        """
+        want = float(self.leverage_num.value)
+        actual = float(min(want, max_leverage))
+        self._lev_seen[pair] = (actual, float(max_leverage))
+        if actual < want:
+            logger.warning(
+                "%s: istenen kaldirac %.0fx ama borsa en fazla %.2fx veriyor",
+                pair, want, max_leverage,
+            )
+        return actual
 
     # ---------------------------------------------------------------- #
 
