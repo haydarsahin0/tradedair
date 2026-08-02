@@ -1,9 +1,9 @@
 {
     "$schema": "https://schema.freqtrade.io/schema.json",
     "bot_name": "tradedair-backtest",
-    "max_open_trades": 2,
+    "max_open_trades": 3,
     "stake_currency": "USDT",
-    "stake_amount": 150,
+    "stake_amount": 100,
     "tradable_balance_ratio": 0.99,
     "fiat_display_currency": "USD",
     "dry_run": true,
