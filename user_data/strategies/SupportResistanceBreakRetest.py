@@ -164,7 +164,7 @@ class SupportResistanceBreakRetest(IStrategy):
     # Seviye oluşturma
     lookback = IntParameter(150, 500, default=300, space="buy", optimize=False)
     cluster_tol_pct = DecimalParameter(0.2, 1.5, default=0.6, decimals=2, space="buy")
-    min_touches = IntParameter(2, 4, default=2, space="buy", optimize=True)
+    min_touches = IntParameter(2, 5, default=3, space="buy", optimize=True)
 
     # Kırılım
     break_margin_pct = DecimalParameter(0.1, 1.0, default=0.25, decimals=2, space="buy")
@@ -178,7 +178,14 @@ class SupportResistanceBreakRetest(IStrategy):
     min_room_pct = DecimalParameter(1.0, 6.0, default=2.5, decimals=1, space="buy")
     max_room_pct = DecimalParameter(8.0, 25.0, default=15.0, decimals=1, space="buy")
     min_rr = DecimalParameter(1.0, 4.0, default=2.0, decimals=1, space="buy")
-    stop_buffer_pct = DecimalParameter(0.1, 1.5, default=0.5, decimals=2, space="buy")
+    # Stop tamponu: kirilan seviyenin ne kadar otesine konacagi.
+    # Ikisinin BUYUGU kullanilir — ATR oynakligi yakalar, yuzde taban gorevi gorur.
+    #
+    # Ilk backtest'te sabit %0.5 tampon %22.5 kazanma orani verdi: stop
+    # gurultu seviyesindeydi ve normal fitiller supuruyordu. ATR'ye baglamak
+    # stop'u piyasanin o anki oynakligina gore olceklendirir.
+    stop_buffer_pct = DecimalParameter(0.2, 2.5, default=1.0, decimals=2, space="buy")
+    stop_buffer_atr = DecimalParameter(0.3, 3.0, default=1.2, decimals=1, space="buy")
 
     # Önde bilinen bir sonraki seviye YOKSA ne yapmalı?
     #   False -> "önü açık" kabul edilir, hedef max_room_pct'e konur (agresif)
@@ -199,10 +206,10 @@ class SupportResistanceBreakRetest(IStrategy):
     #
     #   move >= be_trigger_r    -> stop başabaşa çekilir (artık zarar edemez)
     #   move >= trail_trigger_r -> stop en iyi fiyatın trail_dist_r kadar arkasına
-    breakeven_trigger_r = DecimalParameter(0.5, 2.0, default=1.0, decimals=1, space="sell")
+    breakeven_trigger_r = DecimalParameter(0.8, 3.0, default=1.8, decimals=1, space="sell")
     breakeven_offset_pct = DecimalParameter(0.0, 0.5, default=0.1, decimals=2, space="sell")
-    trail_trigger_r = DecimalParameter(1.0, 3.0, default=1.5, decimals=1, space="sell")
-    trail_dist_r = DecimalParameter(0.3, 1.5, default=0.8, decimals=1, space="sell")
+    trail_trigger_r = DecimalParameter(1.2, 4.0, default=2.5, decimals=1, space="sell")
+    trail_dist_r = DecimalParameter(0.5, 2.0, default=1.0, decimals=1, space="sell")
 
     # --- Kısmi kâr alma ---
     # Hedefe giden yolun bir kısmı katedilince pozisyonun bir bölümünü kapat,
@@ -243,6 +250,7 @@ class SupportResistanceBreakRetest(IStrategy):
         open_ = df["open"].to_numpy(dtype=float)
         volume = df["volume"].to_numpy(dtype=float)
         vol_ma = df["vol_ma"].to_numpy(dtype=float)
+        atr = df["atr"].to_numpy(dtype=float)
 
         left = int(self.pivot_left.value)
         right = int(self.pivot_right.value)
@@ -257,6 +265,7 @@ class SupportResistanceBreakRetest(IStrategy):
         max_room = float(self.max_room_pct.value)
         min_rr = float(self.min_rr.value)
         stop_buf = float(self.stop_buffer_pct.value) / 100.0
+        stop_atr = float(self.stop_buffer_atr.value)
         need_level = bool(self.require_next_level.value)
 
         conf_ph, conf_pl = find_confirmed_pivots(high, low, left, right)
@@ -346,7 +355,11 @@ class SupportResistanceBreakRetest(IStrategy):
 
                     room = (c - target) / c * 100.0
                     room = min(room, max_room)
-                    stop = brk_level * (1 + stop_buf)
+                    # Stop tamponu: yuzde ve ATR'nin BUYUGU.
+                    # Boylece oynak piyasada genisler, sakin piyasada
+                    # yuzde tabani devreye girer.
+                    buf = max(brk_level * stop_buf, stop_atr * atr[t])
+                    stop = brk_level + buf
                     risk = (stop - c) / c * 100.0
 
                     if risk > 0 and not np.isnan(room):
@@ -378,7 +391,8 @@ class SupportResistanceBreakRetest(IStrategy):
 
                     room = (target - c) / c * 100.0
                     room = min(room, max_room)
-                    stop = brk_level * (1 - stop_buf)
+                    buf = max(brk_level * stop_buf, stop_atr * atr[t])
+                    stop = brk_level - buf
                     risk = (c - stop) / c * 100.0
 
                     if risk > 0 and not np.isnan(room):

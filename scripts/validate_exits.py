@@ -3,8 +3,8 @@ Takip eden stop ve kısmi kâr alma mantığının doğrulaması.
 
 Sahte bir işlem hayat döngüsü kurar ve şunları kontrol eder:
   1. Stop başlangıçta yapısal seviyede mi (kırılan seviyenin arkasında)
-  2. 1R lehimize hareket olunca başabaşa çekiliyor mu
-  3. 1.5R sonrası en iyi fiyatı takip ediyor mu
+  2. Başabaş eşiğinde stop girişe çekiliyor mu
+  3. Takip eşiğinden sonra en iyi fiyatı takip ediyor mu
   4. Stop hiç gevşiyor mu (ASLA gevşememeli)
   5. Fiyat geri gelince stop yerinde kalıyor mu
   6. Kısmi kâr alma doğru noktada ve yalnızca bir kez tetikleniyor mu
@@ -90,9 +90,14 @@ def run_case(name, is_short):
     trade = FakeTrade("BTC/USDT:USDT", entry, is_short, struct_stop, target)
 
     # Fiyatın lehimize kademeli ilerlemesi (R cinsinden), sonra geri çekilme
-    path_r = [0.0, 0.5, 1.0, 1.2, 1.5, 2.0, 3.0, 4.0, 3.0, 2.0]
+    be_r = float(strat.breakeven_trigger_r.value)
+    tr_r = float(strat.trail_trigger_r.value)
+    path_r = sorted({0.0, 0.5, be_r - 0.2, be_r, tr_r - 0.2, tr_r,
+                     tr_r + 1.0, tr_r + 2.0}) + [tr_r + 1.0, tr_r]
 
     print(f"  giris={entry}  yapisal stop={struct_stop}  hedef={target}  1R=%{risk*100:.1f}")
+    print(f"  basabas esigi={be_r}R   takip esigi={tr_r}R   takip mesafesi="
+          f"{float(strat.trail_dist_r.value)}R")
     print(f"\n  {'hareket':>8} {'fiyat':>9} {'stop':>9}  durum")
     print(f"  {'-'*8} {'-'*9} {'-'*9}  {'-'*28}")
 
@@ -137,12 +142,13 @@ def run_case(name, is_short):
             at_be = active_stop >= entry - 1e-6
             locked = active_stop > entry + 1e-6
 
-        if r >= 1.0 and not at_be:
-            print(f"  ✗ {r:.1f}R'de stop hala basabasin gerisinde")
+        if r >= be_r and not at_be:
+            print(f"  ✗ {r:.1f}R'de stop hala basabasin gerisinde"
+                  f" (basabas esigi {be_r}R)")
             ok = False
-        if r >= 1.0:
+        if r >= be_r:
             be_seen = True
-        if r >= 1.5 and locked:
+        if r >= tr_r and locked:
             trail_seen = True
 
         label = "yapisal stop"
@@ -165,7 +171,8 @@ def run_case(name, is_short):
         ok = False
     else:
         pnl = (entry - exit_price) / entry if is_short else (exit_price - entry) / entry
-        print(f"\n  Fiyat 4R'ye kadar gitti, geri cekilince {exit_price:.3f}'te cikildi.")
+        print(f"\n  Fiyat {max(path_r):.1f}R'ye kadar gitti, geri cekilince "
+              f"{exit_price:.3f}'te cikildi.")
         print(f"  -> Fiyat bazinda kar: %{pnl*100:.2f}"
               f"   |  3x kaldiracla hesapta: %{pnl*100*3:.2f}")
         if pnl <= 0:
@@ -206,8 +213,8 @@ def main():
     if a and b:
         print("✓ TUM CIKIS TESTLERI GECTI")
         print("  - stop hicbir zaman gevsemedi")
-        print("  - 1R'de basabasa cekildi")
-        print("  - 1.5R sonrasi kari kilitleyerek takip etti")
+        print("  - basabas esiginde girise cekildi")
+        print("  - takip esiginden sonra kari kilitleyerek takip etti")
         print("  - kismi kar alma tam yolun yarisinda, tek sefer calisti")
         return 0
     print("✗ BAZI TESTLER BASARISIZ")
