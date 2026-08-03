@@ -65,6 +65,7 @@ def stop_price(strat, trade, rate):
 
 def run_case(name, is_short, trailing=True):
     strat = CandleExpansion(CFG)
+    strat.use_breakeven.value = trailing
     strat.use_trailing.value = trailing
 
     be_r = float(strat.be_trigger_r.value)

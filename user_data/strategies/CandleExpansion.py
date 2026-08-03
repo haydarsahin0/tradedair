@@ -147,7 +147,20 @@ class CandleExpansion(IStrategy):
     # %8'den %4'e indirdigimizde strateji ZARARA gecmisti. Cok siki bir
     # takip eden stop ayni hatayi yapar — kazananlari erken keser.
     # Bu yuzden varsayilanlar bilerek GEVSEK secildi.
-    use_trailing = BooleanParameter(default=True, space="sell", optimize=True)
+    # OLCULEN (4 cift, TP %9):
+    #   takipsiz : 621 islem | kazanma %21.6 | +%216.08 | dusus %54.0 | Sharpe 1.14
+    #   takipli  : 815 islem | kazanma %26.4 | +%138.04 | dusus %46.0 | Sharpe 0.73
+    #
+    # Takip kazanma oranini yukseltti ve dususu azaltti AMA getiriyi %36
+    # dusurdu; getiri/dusus orani 4.00 -> 3.00. Yine ayni ders: kenar
+    # kalin sag kuyrukta, takip o kuyrugu kesiyor. Bu yuzden VARSAYILAN
+    # KAPALI.
+    #
+    # use_breakeven tek basina acilabilir: stop girise cekilir ama
+    # kazananin ustune sinir konmaz. Kuyrugu kesmeden dususu azaltmayi
+    # hedefleyen ara yol.
+    use_breakeven = BooleanParameter(default=False, space="sell", optimize=True)
+    use_trailing = BooleanParameter(default=False, space="sell", optimize=True)
     be_trigger_r = DecimalParameter(0.5, 3.0, default=2.0, decimals=1, space="sell")
     trail_trigger_r = DecimalParameter(1.0, 4.0, default=3.0, decimals=1, space="sell")
     trail_dist_r = DecimalParameter(0.5, 2.5, default=1.5, decimals=1, space="sell")
@@ -488,7 +501,7 @@ class CandleExpansion(IStrategy):
         if not entry or entry <= 0:
             return None
 
-        if not self.use_trailing.value:
+        if not (self.use_breakeven.value or self.use_trailing.value):
             return stoploss_from_absolute(
                 struct, current_rate, is_short=trade.is_short,
                 leverage=trade.leverage,
@@ -506,11 +519,11 @@ class CandleExpansion(IStrategy):
         new_stop = struct
 
         # Kademe 2 — basabas
-        if move_r >= float(self.be_trigger_r.value):
+        if self.use_breakeven.value and move_r >= float(self.be_trigger_r.value):
             new_stop = min(new_stop, entry) if is_short else max(new_stop, entry)
 
         # Kademe 3 — takip
-        if move_r >= float(self.trail_trigger_r.value):
+        if self.use_trailing.value and move_r >= float(self.trail_trigger_r.value):
             gap = float(self.trail_dist_r.value) * risk
             trail = best * (1 + gap) if is_short else best * (1 - gap)
             new_stop = min(new_stop, trail) if is_short else max(new_stop, trail)
